@@ -11,6 +11,8 @@
 
 #include <MonoAnyValue.h>
 
+#include <IPluginManager.h>
+
 struct IMonoScriptManager;
 
 struct IMonoObject;
@@ -19,8 +21,8 @@ struct IMonoAssembly;
 struct IMonoDomain;
 
 struct IMonoEntityManager;
-
 struct IMonoConverter;
+struct IMonoScriptEventListener;
 
 /// <summary>
 /// Script flags are passed to IMonoScriptSystem::InstantiateScript and RemoveScriptInstance as a way to identify scripts more effectively, and to solve the issue with scripts being of multiple types.
@@ -30,31 +32,31 @@ enum EMonoScriptFlags
 	/// <summary>
 	/// Scripts not inheriting from CryScriptInstance will utilize this script type.
 	/// </summary>
-	eScriptFlag_Any = 1,
+	eScriptFlag_Any = BIT(0),
 	/// <summary>
 	/// Scripts inheriting from CryScriptInstance, but no other CryMono base script will be linked to this script type.
 	/// </summary>
-	eScriptFlag_CryScriptInstance = 2,
+	eScriptFlag_CryScriptInstance = BIT(1),
 	/// <summary>
 	/// Scripts directly inheriting from BaseGameRules will utilize this script type.
 	/// </summary>
-	eScriptFlag_GameRules = 4,
+	eScriptFlag_GameRules = BIT(2),
 	/// <summary>
 	/// Scripts directly inheriting from FlowNode will utilize this script type.
 	/// </summary>
-	eScriptFlag_FlowNode = 8,
+	eScriptFlag_FlowNode = BIT(3),
 	/// <summary>
 	/// Scripts directly inheriting from Entity will utilize this script type.
 	/// </summary>
-	eScriptFlag_Entity = 16,
+	eScriptFlag_Entity = BIT(4),
 	/// <summary>
 	/// Scripts directly inheriting from Actor will utilize this script type.
 	/// </summary>
-	eScriptFlag_Actor = 32,
+	eScriptFlag_Actor = BIT(5),
 	/// <summary>
+	/// Scripts directly inheriting from EntityFlowNode will utilize this script type.
 	/// </summary>
-	eScriptFlag_UIEventSystem = 64,
-	eScriptFlag_ScriptCompiler = 128,
+	eScriptFlag_EntityFlowNode = BIT(6),
 };
 
 /// <summary>
@@ -62,6 +64,19 @@ enum EMonoScriptFlags
 /// </summary>
 struct IMonoScriptSystem
 {
+	/// <summary>
+	/// Returns true when the root domain has been initialized.
+	/// </summary>
+	virtual bool IsInitialized() = 0;
+
+	/// <summary>
+	/// Used to start script recompilation / serialization.
+	/// </summary>
+	virtual void Reload() = 0;
+
+	virtual void AddListener(IMonoScriptEventListener *pListener) = 0;
+	virtual void RemoveListener(IMonoScriptEventListener *pListener) = 0;
+
 	/// <summary>
 	/// Deletes script system instance; cleans up mono objects etc.
 	/// Called from the dll which implements CryMono on engine shutdown (CGameStartup destructor within the sample project)
@@ -78,7 +93,7 @@ struct IMonoScriptSystem
 	/// Instantiates a script (with constructor parameters if supplied) of type and name
 	/// This assumes that the script was present in a .dll in Plugins or within a .cs file when PostInit was called.
 	/// </summary>
-	virtual IMonoObject *InstantiateScript(const char *scriptName, EMonoScriptFlags scriptType = eScriptFlag_Any, IMonoArray *pConstructorParameters = nullptr) = 0;
+	virtual IMonoObject *InstantiateScript(const char *scriptName, EMonoScriptFlags scriptType = eScriptFlag_Any, IMonoArray *pConstructorParameters = nullptr, bool throwOnFail = true) = 0;
 	/// <summary>
 	/// Removes and destructs an instantiated script with the supplied id if found.
 	/// </summary>
@@ -97,14 +112,14 @@ struct IMonoScriptSystem
 	virtual IMonoAssembly *GetCorlibAssembly() = 0;
 
 	/// <summary>
-	/// Loads an .NET assembly at a specific location and returns it in the form of an IMonoAssembly object.
-	/// </summary>
-	virtual IMonoAssembly *GetAssembly(const char *file, bool shadowCopy = false) = 0;
-
-	/// <summary>
 	/// Gets the root domain created on script system initialization.
 	/// </summary>
 	virtual IMonoDomain *GetRootDomain() = 0;
+
+	/// <summary>
+	/// Creates a new app domain.
+	/// </summary>
+	virtual IMonoDomain *CreateDomain(const char *name, bool setActive = false) = 0;
 
 	/// <summary>
 	/// Retrieves an instance of the IMonoConverter; a class used to easily convert C# types to C++ and the other way around.
@@ -112,9 +127,25 @@ struct IMonoScriptSystem
 	virtual IMonoConverter *GetConverter() = 0;
 
 	/// <summary>
-	/// If called prior to default CryMono flownode registration time (IGameFramework PostInit); flownodes are immediately registered.
+	/// Call from IGame::RegisterGameFlownodes in order to have CryMono flow nodes appear in the Flowgraph Editor.
 	/// </summary>
 	virtual void RegisterFlownodes() = 0;
 };
+
+struct IMonoScriptEventListener
+{
+	virtual void OnReloadStart() = 0;
+	virtual void OnReloadComplete() = 0;
+};
+
+static IMonoScriptSystem *_pMonoScriptSystem = nullptr; // internal storage to avoid having the extra overhead from having to call GetPluginByName all the time.
+
+static IMonoScriptSystem *GetMonoScriptSystem()
+{
+	if(_pMonoScriptSystem == nullptr)
+		_pMonoScriptSystem = static_cast<IMonoScriptSystem *>(gPluginManager->GetPluginByName("CryMono")->GetConcreteInterface());
+
+	return _pMonoScriptSystem;
+}
 
 #endif //__I_MONO_SCRIPT_SYSTEM_H__

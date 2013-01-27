@@ -18,20 +18,17 @@ struct IMonoScript;
 struct IMonoArray;
 
 class CScriptClass;
+class CScriptDomain;
 
 class CScriptAssembly 
 	: public CScriptObject
 	, public IMonoAssembly
 {
-	typedef std::map<CScriptClass *, MonoClass *> TClassMap;
 public:
-	CScriptAssembly(MonoImage *pImage, const char *path, bool nativeAssembly = true);
+	CScriptAssembly(CScriptDomain *pDomain, MonoImage *pImage, const char *path, bool nativeAssembly = true);
 	virtual ~CScriptAssembly();
 
 	CScriptClass *TryGetClass(MonoClass *pClass);
-
-	static CScriptAssembly *TryGetAssembly(MonoImage *pImage);
-	static CScriptClass *TryGetClassFromRegistry(MonoClass *pClass);
 
 	// IMonoAssembly
 	virtual IMonoClass *GetClass(const char *className, const char *nameSpace = "CryEngine") override;
@@ -40,12 +37,16 @@ public:
 	virtual const char *GetPath() override { return m_path.c_str(); }
 
 	virtual bool IsNative() override { return m_bNative; }
+
+	virtual IMonoDomain *GetDomain() override { return (IMonoDomain *)m_pDomain; }
+
+	virtual IMonoException *_GetException(const char *nameSpace, const char *exceptionClass, const char *message = nullptr);
 	// ~IMonoAssembly
 
 	// IMonoObject
-	virtual void Release() override;
+	virtual void Release(bool triggerGC = true) override;
 
-	virtual EMonoAnyType GetType() override { return eMonoAnyType_Assembly; }
+	virtual EMonoAnyType GetType() override { return eMonoAnyType_Unknown; }
 	virtual MonoAnyValue GetAnyValue() override { return MonoAnyValue(); }
 
 	virtual mono::object GetManagedObject() override { return (mono::object)mono_assembly_get_object(mono_domain_get(), mono_image_get_assembly((MonoImage *)m_pObject)); }
@@ -53,6 +54,8 @@ public:
 	virtual IMonoClass *GetClass() override { return CScriptObject::GetClass(); }
 
 	virtual void *UnboxObject() override { return CScriptObject::UnboxObject(); }
+
+	virtual const char *ToString() override { return CScriptObject::ToString(); }
 	// ~IMonoObject
 
 	/// <summary>
@@ -67,10 +70,12 @@ public:
 
 private:
 	string m_path;
-
 	bool m_bNative;
 
-	TClassMap m_classRegistry;
+	bool m_bDestroying;
+
+	std::vector<CScriptClass *> m_classes;
+	CScriptDomain *m_pDomain;
 };
 
 #endif //__MONO_ASSEMBLY_H__

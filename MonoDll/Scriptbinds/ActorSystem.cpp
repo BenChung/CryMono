@@ -1,9 +1,12 @@
 #include "StdAfx.h"
 #include "ActorSystem.h"
 
+#include "MonoScriptSystem.h"
 #include "Actor.h"
 
 #include <IGameFramework.h>
+
+CActorSystem::TActorClasses CActorSystem::m_monoActorClasses = TActorClasses();
 
 CActorSystem::CActorSystem()
 {
@@ -15,12 +18,54 @@ CActorSystem::CActorSystem()
 	REGISTER_METHOD(GetActorInfoByChannelId);
 	REGISTER_METHOD(GetActorInfoById);
 
+	REGISTER_METHOD(RegisterActorClass);
 	REGISTER_METHOD(CreateActor);
 	REGISTER_METHOD(RemoveActor);
 
 	REGISTER_METHOD(GetClientActorId);
 
-	gEnv->pGameFramework->RegisterFactory("MonoActor", (CActor *)0, false, (CActor *)0);
+	gEnv->pEntitySystem->AddSink(this, IEntitySystem::OnSpawn, 0);
+}
+
+CActorSystem::~CActorSystem()
+{
+	if(gEnv->pEntitySystem )
+		gEnv->pEntitySystem->RemoveSink(this);
+	else
+		MonoWarning("Failed to unregister CActorSystem entity sink!");
+}
+
+EMonoActorType CActorSystem::GetMonoActorType(const char *actorClassName)
+{
+	for each(auto classPair in m_monoActorClasses)
+	{
+		if(!strcmp(classPair.first, actorClassName))
+			return classPair.second;
+	}
+
+	return EMonoActorType_None;
+}
+
+void CActorSystem::OnSpawn(IEntity *pEntity,SEntitySpawnParams &params)
+{
+	EMonoActorType actorType = GetMonoActorType(pEntity->GetClass()->GetName());
+
+	if(actorType != EMonoActorType_None)
+	{
+		if(IActor *pActor = gEnv->pGameFramework->GetIActorSystem()->GetActor(pEntity->GetId()))
+		{
+			IMonoObject *pScript  = g_pScriptSystem->InstantiateScript(pEntity->GetClass()->GetName(), eScriptFlag_Actor);
+
+			IMonoClass *pActorInfoClass = g_pScriptSystem->GetCryBraryAssembly()->GetClass("ActorInfo");
+
+			SMonoActorInfo actorInfo(pActor);
+
+			pScript->CallMethod("InternalSpawn", pActorInfoClass->BoxObject(&actorInfo));
+
+			if(actorType == EMonoActorType_Managed)
+				static_cast<CActor *>(pActor)->SetScript(pScript);
+		}
+	}
 }
 
 SMonoActorInfo CActorSystem::GetActorInfoByChannelId(uint16 channelId)
@@ -39,17 +84,22 @@ SMonoActorInfo CActorSystem::GetActorInfoById(EntityId id)
 	return SMonoActorInfo();
 }
 
-SMonoActorInfo CActorSystem::CreateActor(mono::object actor, int channelId, mono::string name, mono::string className, Vec3 pos, Quat rot, Vec3 scale)
+void CActorSystem::RegisterActorClass(mono::string name, bool isNative)
+{
+	const char *className = ToCryString(name);
+
+	if(!isNative)
+		gEnv->pGameFramework->RegisterFactory(className, (CActor *)0, false, (CActor *)0);
+
+	m_monoActorClasses.insert(TActorClasses::value_type(className, isNative ? EMonoActorType_Native : EMonoActorType_Managed));
+}
+
+SMonoActorInfo CActorSystem::CreateActor(int channelId, mono::string name, mono::string className, Vec3 pos, Quat rot, Vec3 scale)
 {
 	const char *sClassName = ToCryString(className);
 
 	if(IActor *pActor = gEnv->pGameFramework->GetIActorSystem()->CreateActor(channelId, ToCryString(name), sClassName, pos, rot, scale))
-	{
-		if(!strcmp(sClassName, "MonoActor"))
-			static_cast<CActor *>(pActor)->SetScript(*actor);
-
 		return SMonoActorInfo(pActor);
-	}
 
 	return SMonoActorInfo();
 }

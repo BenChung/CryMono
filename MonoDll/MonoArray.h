@@ -26,16 +26,22 @@ public:
 	// Used to send arrays to C#.
 	CScriptArray(int size, IMonoClass *pContainingType = nullptr);
 
+	CScriptArray() {}
+
 	virtual ~CScriptArray();
 
 	// IMonoArray
 	virtual void Clear() override { for(int i = 0; i < GetSize(); i++) mono_array_set((MonoArray *)m_pObject, void *, i, nullptr);  }
 
-	virtual void Resize(int size);
+	virtual void Remove(int index) override;
+
+	virtual void Resize(int size) override;
 	virtual int GetSize() const override { return (int)mono_array_length((MonoArray *)m_pObject); }
 
-	virtual IMonoClass *GetElementClass() override { return CScriptAssembly::TryGetClassFromRegistry(m_pElementClass); }
-	virtual IMonoClass *GetDefaultElementClass() { return CScriptAssembly::TryGetClassFromRegistry(m_pDefaultElementClass); }
+	virtual IMonoArray *Clone() override { return new CScriptArray((mono::object)mono_array_clone((MonoArray *)m_pObject)); }
+
+	virtual IMonoClass *GetElementClass() override { return GetClass(m_pElementClass); }
+	virtual IMonoClass *GetDefaultElementClass() { return GetClass(m_pDefaultElementClass); }
 
 	virtual IMonoObject *GetItem(int index) override;
 	virtual const char *GetItemString(int index) override { return ToCryString(mono_array_get((MonoArray *)m_pObject, mono::string , index)); }
@@ -43,11 +49,19 @@ public:
 	virtual void InsertNativePointer(void *ptr, int index = -1) override;
 	virtual void InsertObject(IMonoObject *pObject, int index = -1) override;
 	virtual void InsertAny(MonoAnyValue value, int index = -1) override;
-	virtual void InsertMonoString(mono::string string, int index = -1);
+	virtual void InsertMonoString(mono::string string, int index = -1) override { Insert((mono::object)string, index); }
 	// ~IMonoArray
 
+	IMonoClass *GetClass(MonoClass *pClass);
+
 	// IMonoObject
-	virtual void Release() override { delete this; };
+	virtual void Release(bool triggerGC = true) override 
+	{
+		if(!triggerGC)
+			m_objectHandle = -1;
+
+		delete this;
+	}
 	
 	virtual EMonoAnyType GetType() override { return eMonoAnyType_Array; }
 	virtual MonoAnyValue GetAnyValue() override { return MonoAnyValue(); }
@@ -57,15 +71,17 @@ public:
 	virtual IMonoClass *GetClass() override { return CScriptObject::GetClass(); }
 
 	virtual void *UnboxObject() override { return CScriptObject::UnboxObject(); }
+
+	virtual const char *ToString() override { return CScriptObject::ToString(); }
 	// ~IMonoObject
 
-	virtual void InsertMonoArray(mono::object arr, int index = -1);
-	virtual void InsertMonoObject(mono::object object, int index = -1);
+	virtual inline void Insert(mono::object object, int index = -1);
 
 	static MonoClass *m_pDefaultElementClass;
-private:
 
-	int m_curIndex;
+protected:
+	// index of the last object in the array
+	int m_lastIndex;
 
 	MonoClass *m_pElementClass;
 };

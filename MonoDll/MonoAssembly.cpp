@@ -1,48 +1,57 @@
 #include "StdAfx.h"
 #include "MonoAssembly.h"
 
-#include <mono/mini/jit.h>
-#include <mono/metadata/debug-helpers.h>
-#include <mono/metadata/assembly.h>
-
-#include <Windows.h>
+#include "MonoScriptSystem.h"
+#include "MonoDomain.h"
+#include "MonoException.h"
 
 #include "PathUtils.h"
-#include "MonoScriptSystem.h"
 
 #include <MonoClass.h>
 
-CScriptAssembly::CScriptAssembly(MonoImage *pImage, const char *path, bool nativeAssembly)
-	: m_bNative(nativeAssembly) // true if this assembly was loaded via C++.
+#include <mono/mini/jit.h>
+#include <mono/metadata/debug-helpers.h>
+#include <mono/metadata/assembly.h>
+#include <mono/metadata/exception.h>
+
+CScriptAssembly::CScriptAssembly(CScriptDomain *pDomain, MonoImage *pImage, const char *path, bool nativeAssembly)
+	: m_pDomain(pDomain)
+	, m_bNative(nativeAssembly) // true if this assembly was loaded via C++.
+	, m_bDestroying(false)
 {
 	CRY_ASSERT(pImage);
 	m_pObject = (MonoObject *)pImage;
+	m_pClass = NULL;
 
 	m_path = string(path);
 }
 
 CScriptAssembly::~CScriptAssembly()
 {
-	for each(auto classPair in m_classRegistry)
-		classPair.first->Release();
+	m_bDestroying = true;
 
-	CScriptSystem *pScriptSystem = static_cast<CScriptSystem *>(gEnv->pMonoScriptSystem);
-	stl::find_and_erase(pScriptSystem->m_assemblies, this);
+	for(auto it = m_classes.begin(); it != m_classes.end(); ++it)
+		delete *it;
+
+	m_classes.clear();
 
 	m_pObject = 0;
 }
 
-void CScriptAssembly::Release()
+void CScriptAssembly::Release(bool triggerGC)
 {
-	if(m_classRegistry.empty())
+	if(m_classes.empty())
+	{
+		m_pDomain->OnAssemblyReleased(this);
+		// delete assembly should only be directly done by this method and the CScriptDomain dtor, otherwise Release.
 		delete this;
+	}
 }
 
 void CScriptAssembly::OnClassReleased(CScriptClass *pClass)
 {
-	m_classRegistry.erase(pClass);
-
-	//Release();
+	if(!m_bDestroying)
+		stl::find_and_erase(m_classes, pClass);
 }
 
 IMonoClass *CScriptAssembly::GetClass(const char *className, const char *nameSpace)
@@ -54,57 +63,33 @@ IMonoClass *CScriptAssembly::GetClass(const char *className, const char *nameSpa
 	return nullptr;
 }
 
-CScriptClass *CScriptAssembly::TryGetClass(MonoClass *pClass)
+CScriptClass *CScriptAssembly::TryGetClass(MonoClass *pMonoClass)
 {
-	CRY_ASSERT(pClass);
+	CRY_ASSERT(pMonoClass);
 
-	for each(auto pair in m_classRegistry)
+	for each(auto pClass in m_classes)
 	{
-		if(pair.second == pClass)
+		if((MonoClass *)pClass->GetManagedObject() == pMonoClass)
 		{
-			pair.first->AddRef();
-			return pair.first;
+			pClass->AddRef();
+			return pClass;
 		}
 	}
 
-	CScriptClass *pScriptClass = new CScriptClass(pClass, this);
-	m_classRegistry.insert(TClassMap::value_type(pScriptClass, pClass));
+	CScriptClass *pScriptClass = new CScriptClass(pMonoClass, this);
+	m_classes.push_back(pScriptClass);
 	pScriptClass->AddRef();
 
 	return pScriptClass;
 }
 
-///////////////////////////////////////////////////////////////////
-// Statics
-///////////////////////////////////////////////////////////////////
- 
-CScriptAssembly *CScriptAssembly::TryGetAssembly(MonoImage *pImage)
+IMonoException *CScriptAssembly::_GetException(const char *nameSpace, const char *exceptionClass, const char *message)
 {
-	CRY_ASSERT(pImage);
+	MonoException *pException;
+	if(message != nullptr)
+		pException = mono_exception_from_name_msg((MonoImage *)m_pObject, nameSpace, exceptionClass, message);
+	else
+		pException = mono_exception_from_name((MonoImage *)m_pObject, nameSpace, exceptionClass);
 
-	CScriptSystem *pScriptSystem = static_cast<CScriptSystem *>(gEnv->pMonoScriptSystem);
-
-	for each(auto assembly in pScriptSystem->m_assemblies)
-	{
-		if(assembly->GetImage() == pImage)
-			return assembly;
-	}
-
-	// This assembly was loaded from managed code.
-	CScriptAssembly *pAssembly = new CScriptAssembly(pImage, mono_image_get_filename(pImage), false);
-	pScriptSystem->m_assemblies.push_back(pAssembly);
-
-	return pAssembly;
-}
-
-CScriptClass *CScriptAssembly::TryGetClassFromRegistry(MonoClass *pClass)
-{
-	CRY_ASSERT(pClass);
-
-	MonoImage *pImage = mono_class_get_image(pClass);
-
-	if(auto pAssembly = TryGetAssembly(pImage))
-		return pAssembly->TryGetClass(pClass);
-
-	return NULL;
+	return new CScriptException(pException);
 }

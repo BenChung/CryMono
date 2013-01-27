@@ -29,13 +29,12 @@ protected:
 	static IMaterial *LoadMaterial(mono::string name, bool makeIfNotFound, bool nonRemovable);
 
 	static IMaterial *GetSubMaterial(IMaterial *pMaterial, int slot);
+	static int GetSubmaterialCount(IMaterial *pMaterial);
 
 	static IMaterial *GetMaterial(IEntity *pEnt, int slot);
 	static void SetMaterial(IEntity *pEnt, IMaterial *pMaterial, int slot);
 
 	static IMaterial *CloneMaterial(IMaterial *pMat, int subMaterial);
-
-	static mono::string GetSurfaceTypeName(IMaterial *pMaterial);
 
 	static bool SetGetMaterialParamFloat(IMaterial *pMaterial, mono::string paramName, float &v, bool get);
 	static bool SetGetMaterialParamVec3(IMaterial *pMaterial, mono::string paramName, Vec3 &v, bool get);
@@ -48,6 +47,16 @@ protected:
 
 	static int GetShaderParamCount(IMaterial *pMaterial);
 	static mono::string GetShaderParamName(IMaterial *pMaterial, int index);
+
+	static ISurfaceType *GetSurfaceType(IMaterial *pMaterial);
+	static ISurfaceType *GetSurfaceTypeById(int id);
+	static ISurfaceType *GetSurfaceTypeByName(mono::string name);
+
+	static uint16 GetSurfaceTypeId(ISurfaceType *pSurfaceType);
+	static mono::string GetSurfaceTypeName(ISurfaceType *pSurfaceType);
+    static mono::string GetSurfaceTypeTypeName(ISurfaceType *pSurfaceType);
+    static int GetSurfaceTypeFlags(ISurfaceType *pSurfaceType);
+    static ISurfaceType::SPhysicalParams GetSurfaceTypeParams(ISurfaceType *pSurfaceType);
 	// ~Externals
 
 	// IMonoScriptBind

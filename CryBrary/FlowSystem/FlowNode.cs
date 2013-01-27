@@ -1,506 +1,157 @@
 ﻿using System;
-using System.Collections.Generic;
 using System.Linq;
 using System.Reflection;
-using System.Runtime.CompilerServices;
+using System.ComponentModel;
+using System.Collections.Generic;
 using System.Runtime.InteropServices;
+using System.Runtime.CompilerServices;
 
 using CryEngine.Extensions;
 using CryEngine.Initialization;
 using CryEngine.Native;
 
-namespace CryEngine
+using CryEngine.FlowSystem.Native;
+
+namespace CryEngine.FlowSystem
 {
     public abstract class FlowNode : CryScriptInstance
-	{
-		internal static void Register(string typeName)
-		{
-            NativeMethods.FlowNode.RegisterNode(typeName);
-		}
+    {
+        internal static void Register(string typeName)
+        {
+            NativeFlowNodeMethods.RegisterNode(typeName);
+        }
 
-		internal void InternalInitialize(NodeInfo nodeInfo)
-		{
-			HandleRef = new HandleRef(this, nodeInfo.nodePtr);
-			NodeId = nodeInfo.nodeId;
-			GraphId = nodeInfo.graphId;
+        internal bool InternalInitialize(NodeInfo nodeInfo)
+        {
+            Handle = nodeInfo.nodePtr;
+            NodeId = nodeInfo.nodeId;
+            GraphId = nodeInfo.graphId;
 
-			var emptyList = new List<object>();
-			foreach(var member in GetType().GetMembers().Where(x => x.MemberType == MemberTypes.Field || x.MemberType == MemberTypes.Property))
-				ProcessMemberForPort(member, ref emptyList, ref emptyList);
-		}
+            var registrationParams = (FlowNodeBaseRegistrationParams)Script.RegistrationParams;
 
-		internal virtual NodeConfig GetNodeConfig()
-		{
-			var nodeInfo = GetType().GetAttribute<FlowNodeAttribute>();
-			return new NodeConfig(nodeInfo.Category != 0 ? nodeInfo.Category : FlowNodeCategory.Approved, nodeInfo.Description, nodeInfo.HasTargetEntity ? FlowNodeFlags.TargetEntity : 0);
-		}
+            // create instances of OutputPort's.
+            for(int i = 0; i < registrationParams.OutputMembers.Length; i++)
+            {
+                var outputMember = registrationParams.OutputMembers[i];
 
-		internal virtual NodePortConfig GetPortConfig()
-		{
-			if(InputMethods == null)
-				InputMethods = new Dictionary<Type, List<MethodInfo>>();
+                Type type;
+                if (outputMember.MemberType == MemberTypes.Field)
+                    type = (outputMember as FieldInfo).FieldType;
+                else
+                    type = (outputMember as PropertyInfo).PropertyType;
 
-			Type type = GetType();
-			if(!InputMethods.ContainsKey(type))
-				InputMethods.Add(type, new List<MethodInfo>());
+                bool isGenericType = type.IsGenericType;
+                Type genericType = isGenericType ? type.GetGenericArguments()[0] : typeof(void);
 
-			InputMethods[type].Clear();
+                object[] outputPortConstructorArgs = { Handle, i };
+                Type genericOutputPort = typeof(OutputPort<>);
+                object outputPort = Activator.CreateInstance(isGenericType ? genericOutputPort.MakeGenericType(genericType) : type, outputPortConstructorArgs);
 
-			var inputs = new List<object>();
-			var outputs = new List<object>();
+                if (outputMember.MemberType == MemberTypes.Field)
+                    (outputMember as FieldInfo).SetValue(this, outputPort);
+                else
+                    (outputMember as PropertyInfo).SetValue(this, outputPort, null);
+            }
 
-			foreach(var member in type.GetMembers())
-				ProcessMemberForPort(member, ref inputs, ref outputs);
+            return true;
+        }
 
-			return new NodePortConfig(inputs.ToArray(), outputs.ToArray());
-		}
+        internal virtual NodeConfig GetNodeConfig()
+        {
+            var registrationParams = (FlowNodeRegistrationParams)Script.RegistrationParams;
 
-		void ProcessMemberForPort(MemberInfo member, ref List<object> inputs, ref List<object> outputs)
-		{
-			PortAttribute portAttribute;
-			if(member.TryGetAttribute(out portAttribute))
-			{
-				switch(member.MemberType)
-				{
-					case MemberTypes.Method:
-						ProcessInputPort(portAttribute, member as MethodInfo, ref inputs);
-						break;
-					case MemberTypes.Field:
-						ProcessOutputPort(portAttribute, member as FieldInfo, ref outputs);
-						break;
-					case MemberTypes.Property:
-						ProcessOutputPort(portAttribute, member as PropertyInfo, ref outputs);
-						break;
-				}
-			}
-		}
+            return new NodeConfig(registrationParams.filter, registrationParams.description, (registrationParams.hasTargetEntity ? FlowNodeFlags.TargetEntity : 0), registrationParams.type, registrationParams.InputPorts, registrationParams.OutputPorts);
+        }
 
-		void ProcessInputPort(PortAttribute portAttribute, MethodInfo method, ref List<object> inputs)
-		{
-			NodePortType portType;
-			object defaultVal = null;
+        int GetInputPortId(MethodInfo method)
+        {
+            var registrationParams = (FlowNodeBaseRegistrationParams)Script.RegistrationParams;
 
-			if(method.GetParameters().Length > 0)
-			{
-				ParameterInfo parameter = method.GetParameters()[0];
-				if(parameter.ParameterType.IsEnum)
-				{
-					portType = NodePortType.Int;
+            for (int i = 0; i < registrationParams.InputMethods.Length; i++)
+            {
+                if (registrationParams.InputMethods[i] == method)
+                    return i;
+            }
 
-					var values = Enum.GetValues(parameter.ParameterType);
-					if(values.Length <= 0)
-						return;
+            throw new ArgumentException("Invalid input method specified");
+        }
 
-					defaultVal = values.GetValue(0);
+        #region Callbacks
+        /// <summary>
+        /// Called if one or more input ports have been activated.
+        /// </summary>
+        internal void OnPortActivated(int index, object value = null)
+        {
+            var registrationParams = (FlowNodeBaseRegistrationParams)Script.RegistrationParams;
 
-					portAttribute.UIConfig = "enum_int:";
+            var method = registrationParams.InputMethods[index];
 
-					for(int i = 0; i < values.Length; i++)
-					{
-						var value = values.GetValue(i);
+            var parameters = method.GetParameters();
+            int parameterCount = parameters.Length;
 
-						if(i > 0 && i != values.Length)
-							portAttribute.UIConfig += ",";
+            if (value != null && parameterCount == 1)
+            {
+                var paramType = method.GetParameters().ElementAt(0).ParameterType;
+                var valueType = value.GetType();
 
-						portAttribute.UIConfig += Enum.GetName(parameter.ParameterType, value) + "=" + (int)value;
-					}
-				}
-				else
-					portType = GetPortType(parameter.ParameterType);
+                if (paramType != valueType)
+                {
+                    var typeConverter = TypeDescriptor.GetConverter(paramType);
+                    if (typeConverter == null || !typeConverter.CanConvertFrom(valueType))
+                        return;
 
-				if(parameter.IsOptional && defaultVal == null)
-					defaultVal = parameter.DefaultValue;
-				else if(defaultVal == null)
-				{
-					switch(portType)
-					{
-						case NodePortType.Bool:
-							defaultVal = false;
-							break;
-						case NodePortType.EntityId:
-							defaultVal = 0;
-							break;
-						case NodePortType.Float:
-							defaultVal = 0.0f;
-							break;
-						case NodePortType.Int:
-							defaultVal = 0;
-							break;
-						case NodePortType.String:
-							defaultVal = "";
-							break;
-						case NodePortType.Vec3:
-							defaultVal = Vec3.Zero;
-							break;
-					}
-				}
-			}
-			else
-				portType = NodePortType.Void;
+                    value = typeConverter.ConvertFrom(value);
+                }
 
-			string inputPortType = "";
-			switch(portAttribute.Type)
-			{
-				case PortType.Sound:
-					{
-						if(portType == NodePortType.String)
-							inputPortType = "sound_";
-					}
-					break;
-				case PortType.DialogLine:
-					{
-						if(portType == NodePortType.String)
-							inputPortType = "dialogline_";
-					}
-					break;
-				case PortType.Color:
-					{
-						if(portType == NodePortType.Vec3)
-							inputPortType = "color_";
-					}
-					break;
-				case PortType.Texture:
-					{
-						if(portType == NodePortType.String)
-							inputPortType = "texture_";
-					}
-					break;
-				case PortType.Object:
-					{
-						if(portType == NodePortType.String)
-							inputPortType = "object_";
-					}
-					break;
-				case PortType.File:
-					{
-						if(portType == NodePortType.String)
-							inputPortType = "file_";
-					}
-					break;
-				case PortType.EquipmentPack:
-					{
-						if(portType == NodePortType.String)
-							inputPortType = "equip_";
-					}
-					break;
-				case PortType.ReverbPreset:
-					{
-						if(portType == NodePortType.String)
-							inputPortType = "reverbpreset_";
-					}
-					break;
-				case PortType.GameToken:
-					{
-						if(portType == NodePortType.String)
-							inputPortType = "gametoken_";
-					}
-					break;
-				case PortType.Material:
-					{
-						if(portType == NodePortType.String)
-							inputPortType = "mat_";
-					}
-					break;
-				case PortType.Sequence:
-					{
-						if(portType == NodePortType.String)
-							inputPortType = "seq_";
-					}
-					break;
-				case PortType.Mission:
-					{
-						if(portType == NodePortType.String)
-							inputPortType = "mission_";
-					}
-					break;
-				case PortType.Animation:
-					{
-						if(portType == NodePortType.String)
-							inputPortType = "anim_";
-					}
-					break;
-				case PortType.AnimationState:
-					{
-						if(portType == NodePortType.String)
-							inputPortType = "animstate_";
-					}
-					break;
-				case PortType.AnimationStateEx:
-					{
-						if(portType == NodePortType.String)
-							inputPortType = "animstateEx_";
-					}
-					break;
-				case PortType.Bone:
-					{
-						if(portType == NodePortType.String)
-							inputPortType = "bone_";
-					}
-					break;
-				case PortType.Attachment:
-					{
-						if(portType == NodePortType.String)
-							inputPortType = "attachment_";
-					}
-					break;
-				case PortType.Dialog:
-					{
-						if(portType == NodePortType.String)
-							inputPortType = "dialog_";
-					}
-					break;
-				case PortType.MaterialParamSlot:
-					{
-						if(portType == NodePortType.String)
-							inputPortType = "matparamslot_";
-					}
-					break;
-				case PortType.MaterialParamName:
-					{
-						if(portType == NodePortType.String)
-							inputPortType = "matparamname_";
-					}
-					break;
-				case PortType.MaterialParamCharacterAttachment:
-					{
-						if(portType == NodePortType.String)
-							inputPortType = "matparamcharatt_";
-					}
-					break;
-			}
+                var args = new[] { value };
+                method.Invoke(this, args);
+            }
+            else if(parameterCount == 0)
+                method.Invoke(this, null);
+        }
 
-			string name = inputPortType + (portAttribute.Name ?? method.Name);
+        /// <summary>
+        /// Called after level has been loaded, is not called on serialization.
+        /// Note that this is called prior to GameRules.OnClientConnect and OnClientEnteredGame!
+        /// </summary>
+        protected virtual void OnInit() { }
+        #endregion
 
-			inputs.Add(new InputPortConfig(name, portType, defaultVal, portAttribute.Description, portAttribute.Name ?? method.Name, portAttribute.UIConfig));
-			InputMethods[GetType()].Add(method);
-		}
+        #region External methods
+        protected bool IsPortActive<T>(Action<T> port)
+        {
+            return NativeFlowNodeMethods.IsPortActive(Handle, GetInputPortId(port.Method));
+        }
 
-		void ProcessOutputPort(PortAttribute portAttribute, FieldInfo field, ref List<object> outputs)
-		{
-			if(portAttribute.Name == null)
-				portAttribute.Name = field.Name;
+        protected T GetPortValue<T>(Action<T> port)
+        {
+            var type = typeof(T);
 
-			field.SetValue(this, ProcessOutputPortCommon(portAttribute, field.FieldType, ref outputs));
-		}
+            if (type == typeof(int))
+                return (T)(object)NativeFlowNodeMethods.GetPortValueInt(Handle, GetInputPortId(port.Method));
+            if (type == typeof(float))
+                return (T)(object)NativeFlowNodeMethods.GetPortValueFloat(Handle, GetInputPortId(port.Method));
+            if (type == typeof(Vec3) || type == typeof(Color))
+                return (T)(object)NativeFlowNodeMethods.GetPortValueVec3(Handle, GetInputPortId(port.Method));
+            if (type == typeof(string))
+                return (T)(object)NativeFlowNodeMethods.GetPortValueString(Handle, GetInputPortId(port.Method));
+            if (type == typeof(bool))
+                return (T)(object)NativeFlowNodeMethods.GetPortValueBool(Handle, GetInputPortId(port.Method));
+            if (type == typeof(EntityId))
+                return (T)(object)NativeFlowNodeMethods.GetPortValueEntityId(Handle, GetInputPortId(port.Method));
+            if (type.IsEnum)
+                return (T)Enum.ToObject(typeof(T), NativeFlowNodeMethods.GetPortValueInt(Handle, GetInputPortId(port.Method)));
 
-		void ProcessOutputPort(PortAttribute portAttribute, PropertyInfo property, ref List<object> outputs)
-		{
-			if(portAttribute.Name == null)
-				portAttribute.Name = property.Name;
+            throw new ArgumentException("Invalid flownode port type specified!");
+        }
+        #endregion
 
-			property.SetValue(this, ProcessOutputPortCommon(portAttribute, property.PropertyType, ref outputs), null);
-		}
+        internal void InternalSetTargetEntity(IntPtr handle, EntityId entId)
+        {
+            TargetEntity = Entity.CreateNativeEntity(entId, handle);
+        }
 
-		object ProcessOutputPortCommon(PortAttribute portAttribute, Type type, ref List<object> outputs)
-		{
-			if(type.Name.StartsWith("OutputPort"))
-			{
-				bool isGenericType = type.IsGenericType;
-				Type genericType = isGenericType ? type.GetGenericArguments()[0] : typeof(void);
-
-				var portType = GetPortType(genericType);
-
-				object[] outputPortConstructorArgs = { HandleRef.Handle, outputs.Count };
-				Type genericOutputPort = typeof(OutputPort<>);
-				object outputPort = Activator.CreateInstance(isGenericType ? genericOutputPort.MakeGenericType(genericType) : type, outputPortConstructorArgs);
-
-				var portConfig = new OutputPortConfig(portAttribute.Name, portAttribute.Name, portAttribute.Description, portType);
-
-				if(!outputs.Contains(portConfig))
-					outputs.Add(portConfig);
-
-				return outputPort;
-			}
-
-			return null;
-		}
-
-		// Used to call OnActivate methods automatically.
-		static Dictionary<Type, List<MethodInfo>> InputMethods { get; set; }
-
-		//DON'T LOOK AT ME
-		internal static NodePortType GetPortType(Type type)
-		{
-			if(type == typeof(void))
-				return NodePortType.Void;
-			if(type == typeof(int))
-				return NodePortType.Int;
-			if(type == typeof(float))
-				return NodePortType.Float;
-			if(type == typeof(string))
-				return NodePortType.String;
-			if(type == typeof(Vec3))
-				return NodePortType.Vec3;
-			if(type == typeof(bool))
-				return NodePortType.Bool;
-			if(type == typeof(EntityId))
-				return NodePortType.EntityId;
-			
-			throw new ArgumentException("Invalid flownode port type specified!");
-		}
-
-		#region Callbacks
-		/// <summary>
-		/// Called if one or more input ports have been activated.
-		/// </summary>
-		internal void OnPortActivated(int index, object value = null)
-		{
-#if !(RELEASE && RELEASE_DISABLE_CHECKS)
-			if(InputMethods == null)
-				throw new Exception("InputMethods was null!");
-			if(!InputMethods.ContainsKey(GetType()))
-				throw new Exception("InputMethods did not contain the flownode type!");
-#endif
-
-			var method = InputMethods[GetType()].ElementAt(index);
-
-			if(value != null && method.GetParameters().Length > 0)
-				method.Invoke(this, new [] { value });
-			else
-				method.Invoke(this, null);
-		}
-
-		/// <summary>
-		/// Called after level has been loaded, is not called on serialization.
-		/// </summary>
-		protected virtual void OnInit()
-		{
-		}
-		#endregion
-
-		#region External methods
-		/// <summary>
-		/// Gets the int value of an flownode port.
-		/// </summary>
-		/// <param name="port"></param>
-		/// <returns></returns>
-		protected int GetPortInt(Action<int> port)
-		{
-			return NativeMethods.FlowNode.GetPortValueInt(HandleRef.Handle, GetInputPortId(port.Method));
-		}
-
-		protected bool IsIntPortActive(Action<int> port)
-		{
-			return IsPortActive(GetInputPortId(port.Method));
-		}
-
-		protected T GetPortEnum<T>(Action<T> port) where T : struct
-		{
-#if !(RELEASE && RELEASE_DISABLE_CHECKS)
-			if(!typeof(T).IsEnum)
-				throw new ArgumentException("T must be an enumerated type");
-#endif
-
-			return (T)Enum.ToObject(typeof(T), NativeMethods.FlowNode.GetPortValueInt(HandleRef.Handle, GetInputPortId(port.Method)));
-		}
-
-		protected bool IsEnumPortActive(Action<Enum> port)
-		{
-			return IsPortActive(GetInputPortId(port.Method));
-		}
-
-		/// <summary>
-		/// Gets the float value of an flownode port.
-		/// </summary>
-		/// <param name="port"></param>
-		/// <returns></returns>
-		protected float GetPortFloat(Action<float> port)
-		{
-			return NativeMethods.FlowNode.GetPortValueFloat(HandleRef.Handle, GetInputPortId(port.Method));
-		}
-
-		protected bool IsFloatPortActive(Action<float> port)
-		{
-			return IsPortActive(GetInputPortId(port.Method));
-		}
-
-		/// <summary>
-		/// Gets the int value of an flownode port.
-		/// </summary>
-		/// <param name="port"></param>
-		/// <returns></returns>
-		protected Vec3 GetPortVec3(Action<Vec3> port)
-		{
-			return NativeMethods.FlowNode.GetPortValueVec3(HandleRef.Handle, GetInputPortId(port.Method));
-		}
-
-		protected bool IsVec3PortActive(Action<Vec3> port)
-		{
-			return IsPortActive(GetInputPortId(port.Method));
-		}
-
-		/// <summary>
-		/// Gets the string value of an flownode port.
-		/// </summary>
-		/// <param name="port"></param>
-		/// <returns></returns>
-		protected string GetPortString(Action<string> port)
-		{
-			return NativeMethods.FlowNode.GetPortValueString(HandleRef.Handle, GetInputPortId(port.Method));
-		}
-
-		protected bool IsStringPortActive(Action<string> port)
-		{
-			return IsPortActive(GetInputPortId(port.Method));
-		}
-
-		/// <summary>
-		/// Gets the bool value of an flownode port.
-		/// </summary>
-		/// <param name="port"></param>
-		/// <returns></returns>
-		protected bool GetPortBool(Action<bool> port)
-		{
-			return NativeMethods.FlowNode.GetPortValueBool(HandleRef.Handle, GetInputPortId(port.Method));
-		}
-
-		protected bool IsBoolPortActive(Action<bool> port)
-		{
-			return IsPortActive(GetInputPortId(port.Method));
-		}
-
-		protected EntityId GetPortEntityId(Action<EntityId> port)
-		{
-            return new EntityId(NativeMethods.FlowNode.GetPortValueEntityId(HandleRef.Handle, GetInputPortId(port.Method)));
-		}
-
-		protected bool IsEntityIdPortActive(Action<EntityId> port)
-		{
-			return IsPortActive(GetInputPortId(port.Method));
-		}
-
-		int GetInputPortId(MethodInfo method)
-		{
-			var methods = InputMethods[GetType()];
-
-			var index = methods.IndexOf(method);
-			if(index != -1)
-				return index;
-
-			throw new ArgumentException("Invalid input method specified");
-		}
-
-		/// <summary>
-		/// Used to check whether an input port is currently activated.
-		/// </summary>
-		/// <param name="port"></param>
-		/// <returns></returns>
-        private bool IsPortActive(int port) { return NativeMethods.FlowNode.IsPortActive(HandleRef.Handle, port); }
-		#endregion
-
-		public EntityBase TargetEntity
-		{
-			get
-			{
-				uint entId;
-                var entPtr = NativeMethods.FlowNode.GetTargetEntity(HandleRef.Handle, out entId);
-
-				if(entPtr != IntPtr.Zero)
-					return Entity.CreateNativeEntity(new EntityId(entId), entPtr);
-
-				return null;
-			}
-		}
+        public EntityBase TargetEntity { get; private set; }
 
         #region Overrides
         public override int GetHashCode()
@@ -510,56 +161,18 @@ namespace CryEngine
                 int hash = 17;
 
                 hash = hash * 29 + ScriptId.GetHashCode();
-                hash = hash * 29 + HandleRef.GetHashCode();
+                hash = hash * 29 + Handle.GetHashCode();
                 hash = hash * 29 + NodeId.GetHashCode();
                 hash = hash * 29 + GraphId.GetHashCode();
 
                 return hash;
             }
         }
-
-        internal override void OnScriptReloadInternal()
-		{
-            HandleRef = new HandleRef(this, NativeMethods.FlowNode.GetNode(GraphId, NodeId));
-
-            base.OnScriptReloadInternal();
-		}
         #endregion
 
-		public HandleRef HandleRef { get; set; }
+        internal IntPtr Handle { get; set; }
 
-		internal UInt16 NodeId { get; set; }
-		internal UInt32 GraphId { get; set; }
-
-		internal bool Initialized { get; set; }
-	}
-
-	struct NodeInfo
-	{
-		public NodeInfo(IntPtr Pointer, UInt16 NodeId, UInt32 GraphId)
-		{
-			nodePtr = Pointer;
-			nodeId = NodeId;
-			graphId = GraphId;
-		}
-
-		public IntPtr nodePtr;
-		public UInt16 nodeId;
-		public UInt32 graphId;
-	}
-
-	internal struct NodeConfig
-	{
-		public NodeConfig(FlowNodeCategory cat, string desc, FlowNodeFlags nodeFlags = 0)
-			: this()
-		{
-			flags = nodeFlags;
-			category = cat;
-			description = desc;
-		}
-
-		FlowNodeFlags flags;
-		FlowNodeCategory category;
-		string description;
-	}
+        public Int32 NodeId { get; set; }
+        public Int64 GraphId { get; set; }
+    }
 }

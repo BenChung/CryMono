@@ -87,9 +87,10 @@ private:
 	IFlowGraph *m_pHookedGraph;
 
 	IMonoObject *m_pScript;
-	std::shared_ptr<SNodeType> m_pNodeType;
 
 	ENodeCloneType m_cloneType;
+
+	uint32 m_flags;
 };
 
 struct SMonoInputPortConfig
@@ -178,12 +179,10 @@ struct SMonoNodeConfig
 {
 	EFlowNodeFlags flags;
 	EFlowNodeFlags category;
+	ENodeCloneType cloneType;
 
 	mono::string description;
-};
 
-struct SMonoNodePortConfig
-{
 	mono::object inputs;
 	mono::object outputs;
 };

@@ -1,6 +1,8 @@
 #include "StdAfx.h"
 #include "Physics.h"
 
+#include "MonoScriptSystem.h"
+
 #include <IEntitySystem.h>
 
 #include <IMonoArray.h>
@@ -23,10 +25,7 @@ CScriptbind_Physics::CScriptbind_Physics()
 	REGISTER_METHOD(SimulateExplosion);
 
 	REGISTER_METHOD(GetLivingEntityStatus);
-
-	REGISTER_METHOD(GetImpulseStruct);
-	REGISTER_METHOD(GetPlayerDimensionsStruct);
-	REGISTER_METHOD(GetPlayerDynamicsStruct);
+	REGISTER_METHOD(GetDynamicsEntityStatus);
 }
 
 IPhysicalEntity *CScriptbind_Physics::GetPhysicalEntity(IEntity *pEntity)
@@ -130,65 +129,81 @@ void CScriptbind_Physics::SetVelocity(IEntity *pEntity, Vec3 vel)
 	pPhysicalEntity->Action(&asv);
 }
 
-int CScriptbind_Physics::RayWorldIntersection(Vec3 origin, Vec3 dir, int objFlags, unsigned int flags, SMonoRayHit &monoHit, int maxHits, mono::object skipEntities)
+int CScriptbind_Physics::RayWorldIntersection(Vec3 origin, Vec3 dir, int objFlags, unsigned int flags, int maxHits, mono::object skipEntities, mono::object &hits)
 {
-	std::vector<IPhysicalEntity *> physEnts;
+	IPhysicalEntity **pSkipEnts = NULL;
+	int numSkipEnts = 0;
 
 	if(skipEntities)
 	{
 		IMonoArray *pSkipEntities = *skipEntities;
+		numSkipEnts = pSkipEntities->GetSize();
 
-		for(int i = 0; i < pSkipEntities->GetSize(); i++)
+		pSkipEnts = new IPhysicalEntity*[numSkipEnts];
+
+		for(int i = 0; i < numSkipEnts; i++)
 		{
-			if(IEntity *pEntity = gEnv->pEntitySystem->GetEntity(pSkipEntities->GetItem(i)->Unbox<EntityId>()))
-			{
-				if(IPhysicalEntity *pPhysEnt = pEntity->GetPhysics())
-					physEnts.push_back(pPhysEnt);
-			}
-		}
+			IMonoObject *pItem = pSkipEntities->GetItem(i);
 
-		delete pSkipEntities;
+#ifndef RELEASE
+			if(!pItem)
+				g_pScriptSystem->GetCryBraryAssembly()->GetException("CryEngine", "NullPointerException")->Throw();
+#endif
+
+			pSkipEnts[i] = pItem->Unbox<IPhysicalEntity *>();
+		}
 	}
 
-	IPhysicalEntity **pSkipEnts = new IPhysicalEntity*[physEnts.size()];
-
-	for(int i = 0; i < physEnts.size(); i++)
-		pSkipEnts[i] = physEnts[i];
-
-	ray_hit hit;
-	int numHits = gEnv->pPhysicalWorld->RayWorldIntersection(origin, dir, objFlags, flags, &hit, maxHits, pSkipEnts, physEnts.size());
+	ray_hit *pHits = new ray_hit[maxHits];
+	int numHits = gEnv->pPhysicalWorld->RayWorldIntersection(origin, dir, objFlags, flags, pHits, maxHits, pSkipEnts, numSkipEnts);
 
 	SAFE_DELETE_ARRAY(pSkipEnts);
-	physEnts.clear();
 
-	monoHit.bTerrain = hit.bTerrain;
+	if(numHits > 0)
+	{
+		IMonoClass *pRayHitClass = g_pScriptSystem->GetCryBraryAssembly()->GetClass("RaycastHit");
 
-	// We should return physical entity id's really, but this isn't exposed yet.
-	//if(hit.pCollider)
-		//monoHit.colliderId = gEnv->pPhysicalWorld->GetPhysicalEntityId(hit.pCollider);
+		IMonoArray *pRayHits = CreateMonoArray(numHits);//, pRayHitClass);
+		for(int i = 0; i < numHits; i++)
+			pRayHits->InsertObject(pRayHitClass->BoxObject(&pHits[i]));
 
-	monoHit.dist = hit.dist;
-	monoHit.foreignIdx = hit.foreignIdx;
-	monoHit.idmatOrg = hit.idmatOrg;
-	monoHit.iNode = hit.iNode;
-	monoHit.ipart = hit.ipart;
-	monoHit.iPrim = hit.iPrim;
-	monoHit.n = hit.n;
-	monoHit.partid = hit.partid;
-	monoHit.pt = hit.pt;
-	monoHit.surface_idx = hit.surface_idx;
+		hits = pRayHits->GetManagedObject();
+	}
+
+	delete[] pHits;
 
 	return numHits;
 }
 
-void CScriptbind_Physics::SimulateExplosion(pe_explosion explosion)
+mono::object CScriptbind_Physics::SimulateExplosion(pe_explosion explosion)
 {
 	gEnv->pPhysicalWorld->SimulateExplosion(&explosion);
+
+	if(explosion.nAffectedEnts > 0)
+	{
+		IMonoArray *pAffectedEnts = CreateMonoArray(explosion.nAffectedEnts);
+
+		for(int i = 0; i < explosion.nAffectedEnts; i++)
+			pAffectedEnts->InsertNativePointer(explosion.pAffectedEnts[i]);
+
+		return pAffectedEnts->GetManagedObject();
+	}
+
+	return NULL;
 }
 
 pe_status_living CScriptbind_Physics::GetLivingEntityStatus(IEntity *pEntity)
 {
 	pe_status_living status;
+	if(IPhysicalEntity *pPhysEnt = pEntity->GetPhysics())
+		pEntity->GetPhysics()->GetStatus(&status);
+
+	return status;
+}
+
+pe_status_dynamics CScriptbind_Physics::GetDynamicsEntityStatus(IEntity *pEntity)
+{
+	pe_status_dynamics status;
 	if(IPhysicalEntity *pPhysEnt = pEntity->GetPhysics())
 		pEntity->GetPhysics()->GetStatus(&status);
 

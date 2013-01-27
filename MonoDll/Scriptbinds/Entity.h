@@ -57,7 +57,7 @@ struct SEntityRegistrationParams
 
 	EEntityClassFlags Flags;
 
-	mono::object Properties;
+	mono::object Folders;
 };
 
 struct SMonoEntityProperty
@@ -66,12 +66,16 @@ struct SMonoEntityProperty
 	mono::string description;
 	mono::string editType;
 
-	mono::string folder;
-
 	IEntityPropertyHandler::EPropertyType type;
 	uint32 flags;
 
 	IEntityPropertyHandler::SPropertyInfo::SLimits limits;
+};
+
+struct SMonoEntityPropertyFolder
+{
+	mono::string name;
+	mono::object properties;
 };
 
 struct SMonoEntityInfo
@@ -160,7 +164,7 @@ class CScriptbind_Entity
 
 public:
 	CScriptbind_Entity();
-	~CScriptbind_Entity() {}
+	~CScriptbind_Entity();
 
 	// IEntitySystemSink
 	virtual bool OnBeforeSpawn(SEntitySpawnParams &params) { return true; }
@@ -188,12 +192,15 @@ protected:
 	static void RemoveEntity(EntityId, bool removeNow);
 
 	static IEntity *GetEntity(EntityId id);
+	static EntityId GetEntityId(IEntity *pEntity);
 
 	static bool RegisterEntityClass(SEntityRegistrationParams);
 
 	static EntityId FindEntity(mono::string);
 	static mono::object GetEntitiesByClass(mono::string);
 	static mono::object GetEntitiesInBox(AABB bbox, int objTypes);
+
+	static mono::object QueryProximity(AABB box, mono::string className, uint32 nEntityFlags);
 
 	static void SetWorldPos(IEntity *pEnt, Vec3);
 	static Vec3 GetWorldPos(IEntity *pEnt);
@@ -232,8 +239,18 @@ protected:
 	static void SetVisionParams(IEntity *pEntity, float r, float g, float b, float a);
 	static void SetHUDSilhouettesParams(IEntity *pEntity, float r, float g, float b, float a);
 
-	static bool AddEntityLink(IEntity *pEntity, mono::string linkName, EntityId otherId, Quat relativeRot, Vec3 relativePos);
-	static void RemoveEntityLink(IEntity *pEntity, EntityId otherId);
+	static IEntityLink *AddEntityLink(IEntity *pEntity, mono::string linkName, EntityId otherId, Quat relativeRot, Vec3 relativePos);
+	static mono::object GetEntityLinks(IEntity *pEntity);
+	static void RemoveAllEntityLinks(IEntity *pEntity);
+	static void RemoveEntityLink(IEntity *pEntity, IEntityLink *pLink);
+
+	static mono::string GetEntityLinkName(IEntityLink *pLink);
+	static EntityId GetEntityLinkTarget(IEntityLink *pLink);
+	static Quat GetEntityLinkRelativeRotation(IEntityLink *pLink);
+	static Vec3 GetEntityLinkRelativePosition(IEntityLink *pLink);
+	static void SetEntityLinkTarget(IEntityLink *pLink, EntityId);
+	static void SetEntityLinkRelativeRotation(IEntityLink *pLink, Quat);
+	static void SetEntityLinkRelativePosition(IEntityLink *pLink, Vec3);
 
 	static int LoadLight(IEntity *pEntity, int slot, SMonoLightParams light);
 	static void FreeSlot(IEntity *pEntity, int slot);
@@ -274,6 +291,16 @@ protected:
 
 	static void Hide(IEntity *pEntity, bool hide);
 	static bool IsHidden(IEntity *pEntity);
+
+	static IEntity *GetEntityFromPhysics(IPhysicalEntity *pPhysEnt);
+
+	static void SetUpdatePolicy(IEntity *pEntity, EEntityUpdatePolicy policy);
+	static EEntityUpdatePolicy GetUpdatePolicy(IEntity *pEntity);
+
+	static bool IsPrePhysicsUpdateActive(IEntity *pEntity);
+	static void EnablePrePhysicsUpdate(IEntity *pEntity, bool enable);
+
+	static IParticleEmitter *LoadParticleEmitter(IEntity *pEntity, int slot, IParticleEffect *pEffect, SpawnParams &spawnParams);
 	// ~Scriptbinds
 
 	static std::vector<const char *> m_monoEntityClasses;

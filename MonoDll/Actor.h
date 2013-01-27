@@ -21,6 +21,8 @@ class CActor
 	, public IGameObjectView
 	, public IGameObjectProfileManager
 {
+	friend class CSerializeWrapper<ISerialize>;
+
 public:
 	CActor();
 	~CActor();
@@ -145,16 +147,15 @@ public:
 	virtual bool ReloadExtension( IGameObject * pGameObject, const SEntitySpawnParams &params ) override;
 	virtual void PostReloadExtension( IGameObject * pGameObject, const SEntitySpawnParams &params ) override;
 	virtual bool GetEntityPoolSignature( TSerialize signature ) override { signature.BeginGroup("Actor"); signature.EndGroup(); return true;}
-	virtual void FullSerialize( TSerialize ser ) override {}
-	virtual bool NetSerialize( TSerialize ser, EEntityAspects aspect, uint8 profile, int pflags ) override { return true; }
-	virtual void PostSerialize() override {}
+	virtual void FullSerialize( TSerialize ser ) override;
+	virtual bool NetSerialize( TSerialize ser, EEntityAspects aspect, uint8 profile, int pflags ) override;
+	virtual void PostSerialize() override;
 	virtual void SerializeSpawnInfo( TSerialize ser ) override {}
 	virtual ISerializableInfoPtr GetSpawnInfo() override { return nullptr; }
 	virtual void Update( SEntityUpdateContext& ctx, int updateSlot ) override {}
 	virtual void HandleEvent( const SGameObjectEvent& event ) override;
 	virtual void SetChannelId(uint16 id) override {}
-	virtual void SetAuthority( bool auth ) override {}
-	virtual const void *GetRMIBase() const override { return nullptr; }
+	virtual void SetAuthority( bool auth ) override;
 	virtual void PostUpdate( float frameTime ) override {}
 	virtual void PostRemoteSpawn() override {}
 	// ~IGameObjectExtension
@@ -169,7 +170,7 @@ public:
 	virtual uint8 GetDefaultProfile(EEntityAspects aspect) { return aspect == eEA_Physics ? eAP_NotPhysicalized : 0; }
 	// ~IGameObjectProfileManager
 
-	void SetScript(IMonoObject *pObject) { m_pScript = pObject; }
+	void SetScript(IMonoObject *pObject);
 
 protected:
 	IMonoObject *m_pScript;

@@ -1,12 +1,22 @@
 #include "StdAfx.h"
 #include "MonoDomain.h"
 
+#include "MonoScriptSystem.h"
+#include "MonoAssembly.h"
+#include "PathUtils.h"
+
 #include <MonoCommon.h>
 
 #include <mono/metadata/debug-helpers.h>
+#include <mono/metadata/assembly.h>
+
+#define WIN32_LEAN_AND_MEAN
+#include <windows.h>
 
 CScriptDomain::CScriptDomain(ERuntimeVersion runtimeVersion)
 	: m_bRootDomain(true)
+	, m_bDestroying(false)
+	, m_name("root")
 {
 	const char *version = "v2.0.50727";
 	switch(runtimeVersion)
@@ -36,6 +46,8 @@ CScriptDomain::CScriptDomain(ERuntimeVersion runtimeVersion)
 
 CScriptDomain::CScriptDomain(const char *name, bool setActive)
 	: m_bRootDomain(false)
+	, m_bDestroying(false)
+	, m_name(name)
 {
 	m_pDomain = mono_domain_create_appdomain(const_cast<char *>(name), nullptr);
 
@@ -45,11 +57,18 @@ CScriptDomain::CScriptDomain(const char *name, bool setActive)
 
 CScriptDomain::~CScriptDomain()
 {
+	m_bDestroying = true;
+
+	for each(auto assembly in m_assemblies)
+		delete assembly;
+
+	m_assemblies.clear();
+
 	if(m_bRootDomain)
 		mono_jit_cleanup(m_pDomain);
 	else
 	{
-		if(m_pDomain == mono_domain_get())
+		if(IsActive())
 			mono_domain_set(mono_get_root_domain(), false);
 
 		mono_domain_finalize(m_pDomain, 2);
@@ -65,16 +84,97 @@ CScriptDomain::~CScriptDomain()
 		}
 
 		if(pException)	
-		{			
+		{	
 			MonoWarning("An exception was raised during ScriptDomain unload:");
 			MonoMethod *pExceptionMethod = mono_method_desc_search_in_class(mono_method_desc_new("::ToString()", false),mono_get_exception_class());		
 			MonoString *exceptionString = (MonoString *)mono_runtime_invoke(pExceptionMethod, pException, nullptr, nullptr);		
 			CryLogAlways(ToCryString((mono::string)exceptionString));
 		}
 	}
+
+	g_pScriptSystem->OnDomainReleased(this);
 }
 
 bool CScriptDomain::SetActive(bool force)
 {
 	return mono_domain_set(m_pDomain, force) == 1;
+}
+
+string GetTempPath()
+{
+	TCHAR tempPath[MAX_PATH];
+	GetTempPathA(MAX_PATH, tempPath);
+
+	string cryMonoTempDir = string(tempPath) + string("CryMono//");
+
+	DWORD attribs = GetFileAttributesA(cryMonoTempDir.c_str());
+	if(attribs == INVALID_FILE_ATTRIBUTES || attribs | FILE_ATTRIBUTE_DIRECTORY)
+		CryCreateDirectory(cryMonoTempDir.c_str(), nullptr);
+
+	return cryMonoTempDir;
+}
+
+IMonoAssembly *CScriptDomain::LoadAssembly(const char *file, bool shadowCopy, bool convertPdbToMdb)
+{
+	const char *path;
+	if(shadowCopy)
+		path = GetTempPath().append(PathUtil::GetFile(file));
+	else
+		path = file;
+
+	for each(auto assembly in m_assemblies)
+	{
+		if(!strcmp(path, assembly->GetPath()))
+			return assembly;
+	}
+
+	if(shadowCopy)
+		CopyFile(file, path, false);
+
+	string sAssemblyPath(path);
+#ifndef _RELEASE
+	if(convertPdbToMdb && sAssemblyPath.find("pdb2mdb")==-1)
+	{
+		if(IMonoAssembly *pDebugDatabaseCreator = g_pScriptSystem->GetDebugDatabaseCreator())
+		{
+			if(IMonoClass *pDriverClass = pDebugDatabaseCreator->GetClass("Driver", ""))
+			{
+				IMonoArray *pArgs = CreateMonoArray(1);
+				pArgs->Insert(path);
+				pDriverClass->InvokeArray(NULL, "Convert", pArgs);
+				SAFE_RELEASE(pArgs);
+			}
+		}
+	}
+#endif
+
+	MonoAssembly *pMonoAssembly = mono_domain_assembly_open(m_pDomain, path);
+	CRY_ASSERT(pMonoAssembly);
+
+	CScriptAssembly *pAssembly = new CScriptAssembly(this, mono_assembly_get_image(pMonoAssembly), path);
+	m_assemblies.push_back(pAssembly);
+	return pAssembly;
+}
+
+void CScriptDomain::OnAssemblyReleased(CScriptAssembly *pAssembly)
+{
+	if(!m_bDestroying)
+		stl::find_and_erase(m_assemblies, pAssembly);
+}
+
+CScriptAssembly *CScriptDomain::TryGetAssembly(MonoImage *pImage)
+{
+	CRY_ASSERT(pImage);
+
+	for each(auto assembly in m_assemblies)
+	{
+		if(assembly->GetImage() == pImage)
+			return assembly;
+	}
+
+	// This assembly was loaded from managed code.
+	CScriptAssembly *pAssembly = new CScriptAssembly(this, pImage, mono_image_get_filename(pImage), false);
+	m_assemblies.push_back(pAssembly);
+
+	return pAssembly;
 }

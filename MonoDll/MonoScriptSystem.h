@@ -11,23 +11,31 @@
 
 #include <IMonoScriptSystem.h>
 #include <IMonoDomain.h>
+#include <IMonoScriptbind.h>
 
 #include <MonoCommon.h>
 
 #include <IFileChangeMonitor.h>
 #include <IGameFramework.h>
 
-struct IMonoScriptBind;
-
 struct IMonoScriptManager;
 struct IMonoEntityManager;
 
 struct SCVars;
 
-class CScriptAssembly;
-
 class CFlowManager;
 class CInput;
+
+class CScriptDomain;
+class CScriptObject;
+
+enum EScriptReloadResult
+{
+	EScriptReloadResult_Success = 0,
+	EScriptReloadResult_Retry,
+	EScriptReloadResult_Revert,
+	EScriptReloadResult_Abort
+};
 
 class CScriptSystem
 	: public IMonoScriptSystem
@@ -43,24 +51,31 @@ public:
 	~CScriptSystem();
 
 	// IMonoScriptSystem
+	virtual bool IsInitialized() override { return m_pRootDomain != nullptr; }
+
+	virtual void Reload() override;
+
+	virtual void AddListener(IMonoScriptEventListener *pListener) override { m_listeners.push_back(pListener); }
+	virtual void RemoveListener(IMonoScriptEventListener *pListener) override { stl::find_and_erase(m_listeners, pListener); }
+
 	virtual void Release() override { delete this; }
 
 	virtual void RegisterMethodBinding(const void *method, const char *fullMethodName) override;
 
-	virtual IMonoObject *InstantiateScript(const char *scriptName, EMonoScriptFlags scriptType = eScriptFlag_Any, IMonoArray *pConstructorParameters = nullptr) override;
+	virtual IMonoObject *InstantiateScript(const char *scriptName, EMonoScriptFlags scriptType = eScriptFlag_Any, IMonoArray *pConstructorParameters = nullptr, bool throwOnFail = true) override;
 	virtual void RemoveScriptInstance(int id, EMonoScriptFlags scriptType = eScriptFlag_Any) override;
 	
 	virtual IMonoObject *GetScriptManager() { return m_pScriptManager; }
 
-	virtual IMonoAssembly *GetCryBraryAssembly() override;
+	virtual IMonoAssembly *GetCryBraryAssembly() override { return m_pCryBraryAssembly; }
 	virtual IMonoAssembly *GetCorlibAssembly() override;
-	virtual IMonoAssembly *GetAssembly(const char *file, bool shadowCopy = false);
 
-	virtual IMonoDomain *GetRootDomain() override { return m_pRootDomain; }
+	virtual IMonoDomain *GetRootDomain() override { return (IMonoDomain *)m_pRootDomain; }
+	virtual IMonoDomain *CreateDomain(const char *name, bool setActive = false);
 
 	virtual IMonoConverter *GetConverter() override { return m_pConverter; }
 
-	virtual void RegisterFlownodes() { OnSystemEvent(ESYSTEM_EVENT_GAME_POST_INIT, 0, 0); }
+	virtual void RegisterFlownodes() override;
 	// ~IMonoScriptSystem
 
 	// IFileChangeMonitor
@@ -79,18 +94,14 @@ public:
 	virtual void OnSystemEvent(ESystemEvent event,UINT_PTR wparam,UINT_PTR lparam);
 	// ~ISystemEventListener
 
+	CScriptDomain *TryGetDomain(MonoDomain *pDomain);
+	void OnDomainReleased(CScriptDomain *pDomain);
+
 	IMonoAssembly *GetDebugDatabaseCreator() { return m_pPdb2MdbAssembly; }
 
 	CFlowManager *GetFlowManager() const { return m_pFlowManager; }
 
-	bool IsInitialized() { return m_pRootDomain != nullptr; }
-
-	MonoImage *GetAssemblyImage(const char *file);
-	const char *GetAssemblyPath(const char *currentPath, bool shadowCopy);
-
-	std::vector<CScriptAssembly *> m_assemblies;
-
-	void RegisterScriptInstance(IMonoObject *pObject, int scriptId) { m_scriptInstances.insert(TScripts::value_type(pObject, scriptId)); }
+	void EraseBinding(IMonoScriptBind *pScriptBind);
 
 protected:
 	bool CompleteInit();
@@ -98,15 +109,19 @@ protected:
 	void RegisterDefaultBindings();
 
 	// The primary app domain, not really used for anything besides holding the script domain. Do *not* unload this at runtime, we cannot execute another root domain again without restarting.
-	IMonoDomain *m_pRootDomain;
+	CScriptDomain *m_pRootDomain;
+	std::vector<CScriptDomain *> m_domains;
 
+	IMonoDomain *m_pScriptDomain;
 	IMonoObject *m_pScriptManager;
 
-	// Map containing all scripts and their id's for quick access.
-	TScripts m_scriptInstances;
+	bool m_bFirstReload;
+	bool m_bReloading;
+	bool m_bDetectedChanges;
+
+	bool m_bQuitting;
 
 	CFlowManager *m_pFlowManager;
-	CInput *m_pInput;
 
 	IMonoConverter *m_pConverter;
 
@@ -118,8 +133,11 @@ protected:
 	// We temporarily store scriptbind methods here if developers attempt to register them prior to the script system has been initialized properly.
 	TMethodBindings m_methodBindings;
 
-	// ScriptBinds declared in this project are stored here to make sure they are destructed on shutdown.
-	std::vector<std::shared_ptr<IMonoScriptBind>> m_localScriptBinds;
+	std::vector<IMonoScriptBind *> m_localScriptBinds;
+
+	std::vector<IMonoScriptEventListener *> m_listeners;
 };
+
+extern CScriptSystem *g_pScriptSystem;
 
 #endif //__MONO_H__

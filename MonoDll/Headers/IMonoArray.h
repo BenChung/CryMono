@@ -36,6 +36,11 @@ public:
 	virtual void Clear() = 0;
 
 	/// <summary>
+	/// Removes the object at the specified index.
+	/// </summary>
+	virtual void Remove(int index) = 0;
+
+	/// <summary>
 	/// Resizes the array.
 	/// </summary>
 	virtual void Resize(int size) = 0;
@@ -43,6 +48,11 @@ public:
 	/// Retrieves the size of the array.
 	/// </summary>
 	virtual int GetSize() const = 0;
+
+	/// <summary>
+	/// Clones the array.
+	/// </summary>
+	virtual IMonoArray *Clone() = 0;
 
 	/// <summary>
 	/// Gets the type of objects stored in this array.

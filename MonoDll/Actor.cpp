@@ -1,5 +1,8 @@
+
 #include "StdAfx.h"
 #include "Actor.h"
+
+#include "MonoScriptSystem.h"
 
 #include <IGameRulesSystem.h>
 #include <IViewSystem.h>
@@ -36,7 +39,7 @@ CActor::~CActor()
 }
 
 bool CActor::Init(IGameObject *pGameObject)
-{ 
+{
 	SetGameObject(pGameObject);
 
 	if(!GetGameObject()->CaptureView(this))
@@ -57,11 +60,26 @@ bool CActor::Init(IGameObject *pGameObject)
 
 	GetEntity()->SetFlags(GetEntity()->GetFlags()|(ENTITY_FLAG_ON_RADAR|ENTITY_FLAG_CUSTOM_VIEWDIST_RATIO));
 
+	GetGameObject()->SetAspectProfile(eEA_Physics, eAP_Alive);
+
+	if(IEntityRenderProxy *pProxy = (IEntityRenderProxy *)GetEntity()->GetProxy(ENTITY_PROXY_RENDER))
+	{
+		if(IRenderNode *pRenderNode = pProxy->GetRenderNode())
+			pRenderNode->SetRndFlags(ERF_REGISTER_BY_POSITION, true);
+	}
+
 	return true; 
 }
 
 void CActor::PostInit(IGameObject *pGameObject)
 {
+	if (m_pAnimatedCharacter)
+		m_pAnimatedCharacter->ResetState();
+
+	if(gEnv->bMultiplayer)
+		GetGameObject()->SetUpdateSlotEnableCondition( this, 0, eUEC_WithoutAI );
+	else if (!gEnv->bServer)
+		GetGameObject()->SetUpdateSlotEnableCondition( this, 0, eUEC_VisibleOrInRange );
 }
 
 bool CActor::ReloadExtension( IGameObject *pGameObject, const SEntitySpawnParams &params )
@@ -93,12 +111,19 @@ void CActor::PostReloadExtension( IGameObject * pGameObject, const SEntitySpawnP
 {
 	CRY_ASSERT(GetGameObject() == pGameObject);
 
-	pGameObject->AcquireExtension("Inventory");
-
 	GetGameObject()->EnablePrePhysicsUpdate( gEnv->bMultiplayer ? ePPU_Always : ePPU_WhenAIActivated );
 
 	GetEntity()->SetFlags(GetEntity()->GetFlags() |
 		(ENTITY_FLAG_ON_RADAR | ENTITY_FLAG_CUSTOM_VIEWDIST_RATIO | ENTITY_FLAG_TRIGGER_AREAS));
+}
+
+void CActor::SetAuthority( bool auth )
+{
+	// we've been given authority of this entity, mark the physics as changed
+	// so that we send a current position, failure to do this can result in server/client
+	// disagreeing on where the entity is. most likely to happen on restart
+	if(auth)
+		CHANGED_NETWORK_STATE(this, eEA_Physics);
 }
 
 void CActor::HandleEvent(const SGameObjectEvent &event)
@@ -140,16 +165,37 @@ void CActor::ProcessEvent(SEntityEvent& event)
 		GetGameObject()->RequestRemoteUpdate(eEA_Physics | eEA_GameClientDynamic | eEA_GameServerDynamic | eEA_GameClientStatic | eEA_GameServerStatic);
 		break;
 	case ENTITY_EVENT_START_GAME:
-		GetGameObject()->RequestRemoteUpdate(eEA_Physics | eEA_GameClientDynamic | eEA_GameServerDynamic | eEA_GameClientStatic | eEA_GameServerStatic);
+		{
+			GetGameObject()->RequestRemoteUpdate(eEA_Physics | eEA_GameClientDynamic | eEA_GameServerDynamic | eEA_GameClientStatic | eEA_GameServerStatic);
+
+			if (m_pAnimatedCharacter)
+				m_pAnimatedCharacter->ResetState();
+		}
 		break;
 	case ENTITY_EVENT_RESET:
-		m_pScript->CallMethod("OnEditorReset", event.nParam[0]==1);
-		GetGameObject()->RequestRemoteUpdate(eEA_Physics | eEA_GameClientDynamic | eEA_GameServerDynamic | eEA_GameClientStatic | eEA_GameServerStatic);
+		{
+			if (m_pAnimatedCharacter)
+				m_pAnimatedCharacter->ResetState();
+
+			m_pScript->CallMethod("OnEditorReset", event.nParam[0]==1);
+			GetGameObject()->RequestRemoteUpdate(eEA_Physics | eEA_GameClientDynamic | eEA_GameServerDynamic | eEA_GameClientStatic | eEA_GameServerStatic);
+		}
 		break;
 	case ENTITY_EVENT_PREPHYSICSUPDATE:
 		m_pScript->CallMethod("OnPrePhysicsUpdate");
 		break;
+	case ENTITY_EVENT_INIT:
+		{
+			if (m_pAnimatedCharacter)
+				m_pAnimatedCharacter->ResetState();
+		}
+		break;
   }  
+}
+
+void CActor::SetScript(IMonoObject *pObject)
+{
+	m_pScript = pObject;
 }
 
 void CActor::UpdateView(SViewParams &viewParams)
@@ -326,6 +372,7 @@ bool CActor::SetAspectProfile( EEntityAspects aspect, uint8 profile )
 
 void CActor::InitLocalPlayer()
 {
+	GetGameObject()->SetUpdateSlotEnableCondition( this, 0, eUEC_WithoutAI );
 	//gEnv->pGameFramework->GetIActorSystem()->SetLocalPlayerId(GetEntityId());
 }
 
@@ -336,7 +383,7 @@ float CActor::GetHealth() const
 
 void CActor::SetHealth(float health)
 {
-	m_pScript->SetPropertyValue("Health", *gEnv->pMonoScriptSystem->GetConverter()->BoxAnyValue(MonoAnyValue(health)));
+	m_pScript->SetPropertyValue("Health", *g_pScriptSystem->GetConverter()->BoxAnyValue(MonoAnyValue(health)));
 }
 
 float CActor::GetMaxHealth() const
@@ -346,5 +393,107 @@ float CActor::GetMaxHealth() const
 
 void CActor::SetMaxHealth(float health)
 {
-	m_pScript->SetPropertyValue("MaxHealth", *gEnv->pMonoScriptSystem->GetConverter()->BoxAnyValue(MonoAnyValue(health)));
+	m_pScript->SetPropertyValue("MaxHealth", *g_pScriptSystem->GetConverter()->BoxAnyValue(MonoAnyValue(health)));
+}
+
+bool CActor::NetSerialize( TSerialize ser, EEntityAspects aspect, uint8 profile, int pflags )
+{
+	if (aspect == eEA_Physics)
+	{
+		pe_type type = PE_NONE;
+		switch (profile)
+		{
+		case eAP_NotPhysicalized:
+			type = PE_NONE;
+			break;
+		case eAP_Spectator:
+			type = PE_LIVING;
+			break;
+		case eAP_Alive:
+			type = PE_LIVING;
+			break;
+		case eAP_Sleep:
+			type = PE_ARTICULATED;
+			break;
+		case eAP_Frozen:
+			type = PE_RIGID;
+			break;
+		case eAP_Ragdoll:
+			type = PE_ARTICULATED;
+			break;
+		case eAP_Linked: 	//if actor is attached to a vehicle - don't serialize actor physics additionally
+			return true;
+			break;
+		default:
+			return false;
+		}
+
+		// TODO: remove this when craig fixes it in the network system
+		if (profile==eAP_Spectator)
+		{
+			int x=0;	
+			ser.Value("unused", x, 'skip');
+		}
+		else if (profile==eAP_Sleep)
+		{
+			int x=0;	
+			ser.Value("unused1", x, 'skip');
+			ser.Value("unused2", x, 'skip');
+		}
+
+		if (type == PE_NONE)
+			return true;
+
+		IEntityPhysicalProxy * pEPP = (IEntityPhysicalProxy *) GetEntity()->GetProxy(ENTITY_PROXY_PHYSICS);
+		if (ser.IsWriting())
+		{
+			if (!pEPP || !pEPP->GetPhysicalEntity() || pEPP->GetPhysicalEntity()->GetType() != type)
+			{
+				gEnv->pPhysicalWorld->SerializeGarbageTypedSnapshot( ser, type, 0 );
+				return true;
+			}
+		}
+		else if (!pEPP)
+		{
+			return false;
+		}
+
+		// PLAYERPREDICTION
+    	if(type!=PE_LIVING)
+    	{
+      		pEPP->SerializeTyped( ser, type, pflags );
+    	}
+		// ~PLAYERPREDICTION
+	}
+
+	ser.BeginGroup("ManagedActor");
+
+	IMonoArray *pArgs = CreateMonoArray(4);
+	pArgs->InsertNativePointer(&ser);
+	pArgs->Insert(aspect);
+	pArgs->Insert(profile);
+	pArgs->Insert(pflags);
+
+	m_pScript->GetClass()->InvokeArray(m_pScript, "InternalNetSerialize", pArgs);
+
+	ser.EndGroup();
+
+	return true;
+}
+
+void CActor::FullSerialize(TSerialize ser)
+{
+	ser.BeginGroup("ManagedActor");
+
+	IMonoArray *pArgs = CreateMonoArray(1);
+	pArgs->InsertNativePointer(&ser);
+
+	m_pScript->GetClass()->InvokeArray(m_pScript, "InternalFullSerialize", pArgs);
+
+	ser.EndGroup();
+}
+
+void CActor::PostSerialize()
+{
+	m_pScript->CallMethod("PostSerialize");
 }

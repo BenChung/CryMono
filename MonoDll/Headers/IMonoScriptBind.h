@@ -14,14 +14,15 @@
 
 /// <summary>
 /// Simple pre-processor method used to quickly register methods within scriptbinds.
-/// We add _'s before the method name to easily distinguish between standard methods and externals (scriptbinds) in C#.
 /// </summary>
-#define REGISTER_METHOD(method) gEnv->pMonoScriptSystem->RegisterMethodBinding(method, (GetNamespace() + (string)".").append(GetClassName()).append("::").append("_" #method))
+#define REGISTER_METHOD(method) GetMonoScriptSystem()->RegisterMethodBinding(method, (GetNamespace() + (string)".").append(GetClassName()).append("::").append(#method))
 
 /// <summary>
 /// </summary>
 struct IMonoScriptBind
 {
+	virtual ~IMonoScriptBind() {}
+
 	/// <summary>
 	/// The namespace in which the Mono class this scriptbind is tied to resides in; returns "CryEngine.Native" by default if not overridden.
 	/// </summary>

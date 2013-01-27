@@ -10,11 +10,6 @@
 
 CScriptbind_Console::CScriptbind_Console()
 {
-	// Logging
-	//REGISTER_METHOD(LogAlways);
-	//REGISTER_METHOD(Log);
-	//REGISTER_METHOD(Warning);
-	
 	REGISTER_METHOD(HandleException);
 
 	// Console commands
@@ -38,24 +33,6 @@ CScriptbind_Console::CScriptbind_Console()
 	REGISTER_METHOD(Execute);
 }
 
-extern "C"
-{
-	_declspec(dllexport) void __cdecl _LogAlways(const char *msg)
-	{
-		CryLogAlways(msg);
-	}
-
-	_declspec(dllexport) void __cdecl _Log(const char *msg)
-	{
-		CryLog(msg);
-	}
-
-	_declspec(dllexport) void __cdecl _Warning(const char *msg)
-	{
-		MonoWarning(msg); 
-	}
-}
-
 void CScriptbind_Console::HandleException(mono::object exception)
 {
 	CScriptObject::HandleException((MonoObject *)exception);
@@ -66,12 +43,13 @@ void CScriptbind_Console::Execute(mono::string string, bool silent)
 	gEnv->pConsole->ExecuteString(ToCryString(string), silent); 
 }
 
+#undef GetCommandLine
 void CScriptbind_Console::OnMonoCmd(IConsoleCmdArgs *cmdArgs)
 {
 	IMonoArray *pArgs = CreateMonoArray(1);
 	pArgs->Insert(cmdArgs->GetCommandLine());
 
-	gEnv->pMonoScriptSystem->GetCryBraryAssembly()->GetClass("ConsoleCommand")->InvokeArray(NULL, "OnCommand", pArgs);
+	g_pScriptSystem->GetCryBraryAssembly()->GetClass("ConsoleCommand")->InvokeArray(NULL, "OnCommand", pArgs);
 }
 
 void CScriptbind_Console::RegisterCommand(mono::string cmd, mono::string desc, EVarFlags flags)

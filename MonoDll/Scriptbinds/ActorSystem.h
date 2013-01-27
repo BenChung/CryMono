@@ -18,29 +18,56 @@
 struct SMonoActorInfo
 {
 	SMonoActorInfo() : id(0) {}
+
 	SMonoActorInfo(IActor *pIActor)
 		: pActor(pIActor)
 	{
 		pEntity = pIActor->GetEntity();
 		id = pEntity->GetId();
+		channelId = pActor->GetChannelId();
 	}
+
+	SMonoActorInfo(EntityId entId, int chId)
+		: id(entId)
+		, channelId(chId) {}
 
 	IEntity *pEntity;
 	IActor *pActor;
 	EntityId id;
+	int channelId;
 };
 
-class CActorSystem : public IMonoScriptBind
+enum EMonoActorType
+{
+	EMonoActorType_Managed,
+	EMonoActorType_Native,
+	EMonoActorType_None,
+};
+
+class CActorSystem 
+	: public IMonoScriptBind
+	, public IEntitySystemSink
 {
 public:
 	CActorSystem();
-	~CActorSystem() {}
+	~CActorSystem();
+
+	// IEntitySystemSink
+	virtual bool OnBeforeSpawn(SEntitySpawnParams &params) { return true; }
+	virtual void OnSpawn(IEntity *pEntity,SEntitySpawnParams &params);
+	virtual bool OnRemove(IEntity *pEntity) { return true; }
+	virtual void OnReused( IEntity *pEntity, SEntitySpawnParams &params) {}
+	virtual void OnEvent(IEntity *pEntity, SEntityEvent &event) {}
+	// ~IEntitySystemSink
 
 protected:
 	// IMonoScriptBind
 	virtual const char *GetClassName() { return "NativeActorMethods"; }
 	// ~IMonoScriptBind
 
+	static EMonoActorType GetMonoActorType(const char *actorClassName);
+
+	// externals
 	static float GetPlayerHealth(IActor *pActor);
 	static void SetPlayerHealth(IActor *pActor, float);
 	static float GetPlayerMaxHealth(IActor *pActor);
@@ -49,10 +76,14 @@ protected:
 	static SMonoActorInfo GetActorInfoByChannelId(uint16 channelId);
 	static SMonoActorInfo GetActorInfoById(EntityId id);
 
-	static SMonoActorInfo CreateActor(mono::object actor, int channelId, mono::string name, mono::string className, Vec3 pos, Quat rot, Vec3 scale);
+	static void RegisterActorClass(mono::string name, bool isNative);
+	static SMonoActorInfo CreateActor(int channelId, mono::string name, mono::string className, Vec3 pos, Quat rot, Vec3 scale);
 	static void RemoveActor(EntityId id);
 
 	static EntityId GetClientActorId();
+
+	typedef std::map<const char *, EMonoActorType> TActorClasses;
+	static TActorClasses m_monoActorClasses;
 };
 
 #endif //__SCRIPTBIND_ACTORSYSTEM_H__
