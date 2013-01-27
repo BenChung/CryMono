@@ -9,6 +9,8 @@
 #ifndef __I_MONO_DOMAIN_H__
 #define __I_MONO_DOMAIN_H__
 
+struct IMonoAssembly;
+
 struct IMonoDomain
 {
 	/// <summary>
@@ -29,6 +31,16 @@ struct IMonoDomain
 	/// If true, this is the primary domain.
 	/// </summary>
 	virtual bool IsRoot() = 0;
+
+	/// <summary>
+	/// Loads an assembly into the domain.
+	/// </summary>
+	virtual IMonoAssembly *LoadAssembly(const char *file, bool shadowCopy = false, bool convertPdbToMdb = true) = 0;
+
+	/// <summary>
+	/// Gets domain name chosen at creation.
+	/// </summary>
+	virtual const char *GetName() = 0;
 };
 
 /// <summary>

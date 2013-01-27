@@ -50,7 +50,7 @@ public:
 	/// <summary>
 	/// Releases the object. Warning: also destructed in managed code!
 	/// </summary>
-	virtual void Release() = 0;
+	virtual void Release(bool triggerGC = true) = 0;
 
 	/// <summary>
 	/// Gets the unboxed object and casts it to the requested type. (class T)
@@ -64,6 +64,8 @@ public:
 	virtual EMonoAnyType GetType() = 0;
 
 	virtual MonoAnyValue GetAnyValue() = 0;
+
+	virtual const char *ToString() = 0;
 	
 	/// <summary>
 	/// Returns the object as it is seen in managed code, can be passed directly across languages.
@@ -175,7 +177,7 @@ inline IMonoObject *IMonoObject::GetPropertyValue(const char *propertyName)
 
 inline void IMonoObject::SetPropertyValue(const char *propertyName, IMonoObject *pNewValue)
 {
-	GetClass()->SetPropertyValue(this, propertyName, pNewValue);
+	GetClass()->SetPropertyValue(this, propertyName, (pNewValue != nullptr ? pNewValue->GetManagedObject() : nullptr));
 }
 
 inline IMonoObject *IMonoObject::GetFieldValue(const char *fieldName)
@@ -185,7 +187,7 @@ inline IMonoObject *IMonoObject::GetFieldValue(const char *fieldName)
 
 inline void IMonoObject::SetFieldValue(const char *fieldName, IMonoObject *pNewValue)
 {
-	GetClass()->SetFieldValue(this, fieldName, pNewValue);
+	GetClass()->SetFieldValue(this, fieldName, (pNewValue != nullptr ? pNewValue->GetManagedObject() : nullptr));
 }
 
 #endif //__I_MONO_OBJECT_H__

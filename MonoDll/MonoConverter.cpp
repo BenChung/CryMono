@@ -3,7 +3,9 @@
 
 #include "MonoCVars.h"
 
+#include "MonoScriptSystem.h"
 #include "MonoArray.h"
+#include "DynMonoArray.h"
 #include "MonoObject.h"
 
 #include <IMonoAssembly.h>
@@ -11,6 +13,11 @@
 IMonoArray *CConverter::CreateArray(int numArgs, IMonoClass *pElementClass)
 {
 	return new CScriptArray(numArgs, pElementClass); 
+}
+
+IMonoArray *CConverter::CreateDynamicArray(IMonoClass *pElementClass, int size)
+{
+	return new CDynScriptArray(pElementClass, size);
 }
 
 IMonoArray *CConverter::ToArray(mono::object arr)
@@ -36,16 +43,12 @@ mono::object CConverter::BoxAnyValue(MonoAnyValue &any)
 	case eMonoAnyType_Integer:
 		return (mono::object)mono_value_box(mono_domain_get(), mono_get_int32_class(), &any.i);
 	case eMonoAnyType_UnsignedInteger:
+		return (mono::object)mono_value_box(mono_domain_get(), mono_get_uint32_class(), &any.u);
+	case eMonoAnyType_EntityId:
 		{
-			if(g_pMonoCVars->mono_boxUnsignedIntegersAsEntityIds)
-			{
-				IMonoClass *pEntityIdClass = gEnv->pMonoScriptSystem->GetCryBraryAssembly()->GetClass("EntityId");
-				return (mono::object)mono_value_box(mono_domain_get(), (MonoClass *) pEntityIdClass->GetManagedObject(), &mono::entityId(any.u));
-			}
-			else
-				return (mono::object)mono_value_box(mono_domain_get(), mono_get_uint32_class(), &any.u);
+			IMonoClass *pEntityIdClass = g_pScriptSystem->GetCryBraryAssembly()->GetClass("EntityId");
+			return pEntityIdClass->BoxObject(&mono::entityId(any.u))->GetManagedObject();
 		}
-		break;
 	case eMonoAnyType_Short:
 		return (mono::object)mono_value_box(mono_domain_get(), mono_get_int16_class(), &any.i);
 	case eMonoAnyType_UnsignedShort:
@@ -56,8 +59,8 @@ mono::object CConverter::BoxAnyValue(MonoAnyValue &any)
 		MonoWarning("IMonoConverter::BoxAnyValue does not support strings, utilize ToMonoString instead");
 	case eMonoAnyType_Vec3:
 		{
-			IMonoClass *pVec3Class = gEnv->pMonoScriptSystem->GetCryBraryAssembly()->GetClass("Vec3");
-			return (mono::object)mono_value_box(mono_domain_get(), (MonoClass *)pVec3Class->GetManagedObject(), &any.vec3);
+			IMonoClass *pVec3Class = g_pScriptSystem->GetCryBraryAssembly()->GetClass("Vec3");
+			return pVec3Class->BoxObject(&any.vec3)->GetManagedObject();
 		}
 		break;
 	}

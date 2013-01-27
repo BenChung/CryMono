@@ -21,6 +21,7 @@ enum EMonoAnyType
 
 	eMonoAnyType_Integer,
 	eMonoAnyType_UnsignedInteger,
+	eMonoAnyType_EntityId,
 	eMonoAnyType_Short,
 	eMonoAnyType_UnsignedShort,
 	eMonoAnyType_Float,
@@ -28,8 +29,6 @@ enum EMonoAnyType
 
 	eMonoAnyType_String,
 	eMonoAnyType_Array,
-	eMonoAnyType_Class,
-	eMonoAnyType_Assembly,
 	eMonoAnyType_IntPtr,
 
 	eMonoAnyType_Last
@@ -65,6 +64,9 @@ struct MonoAnyValue : public ISerializable
 		case eMonoAnyType_UnsignedShort:
 			ser.Value("uint", u, 'ui32');
 			break;
+		case eMonoAnyType_EntityId:
+			ser.Value("entityId", u, 'eid');
+			break;
 		case eMonoAnyType_Integer:
 		case eMonoAnyType_Short:
 			ser.Value("int", i, 'i32');
@@ -73,17 +75,30 @@ struct MonoAnyValue : public ISerializable
 			ser.Value("float", f);
 			break;
 		case eMonoAnyType_Vec3:
-			ser.Value("vec", Vec3(vec3.x, vec3.y, vec3.z));
+			{
+				if(ser.IsWriting())
+					ser.Value("vec", Vec3(vec3.x, vec3.y, vec3.z));
+				else
+				{
+					Vec3 v;
+					ser.Value("vec", v);
+
+					vec3.x = v.x;
+					vec3.y = v.y;
+					vec3.z = v.z;
+				}
+			}
 			break;
 		case eMonoAnyType_String:
 			{
 				if(ser.IsWriting())
 				{
-					serializedString = string(str);
+					auto serializedString = string(str);
 					ser.Value("str", serializedString); 
 				}
 				else
 				{
+					auto serializedString = string();
 					ser.Value("str", serializedString);
 					str = serializedString.c_str();
 				}
@@ -100,6 +115,7 @@ struct MonoAnyValue : public ISerializable
 			return &b;
 		case eMonoAnyType_UnsignedInteger:
 		case eMonoAnyType_UnsignedShort:
+		case eMonoAnyType_EntityId:
 			return &u;
 		case eMonoAnyType_Integer:
 		case eMonoAnyType_Short:
@@ -123,8 +139,6 @@ struct MonoAnyValue : public ISerializable
 		const char*		str;
 		struct { float x,y,z; } vec3;
 	};
-
-	string serializedString;
 };
 
 #endif //__MONO_ANY_VALUE__

@@ -10,6 +10,7 @@
 #define __I_MONO_ASSEMBLY__
 
 #include <IMonoObject.h>
+#include <IMonoException.h>
 
 struct IMonoClass;
 
@@ -31,7 +32,7 @@ public:
 	/// Note: This does not construct an new instance of the class, only returns an uninitialized IMonoScript. To instantiate a class, see IMonoAssembly::InstantiateClass
 	/// </summary>
 	/// <example>
-	/// IMonoScript *pClass = gEnv->pMonoScriptSystem->GetCryBraryAssembly()->GetCustomClass("Vec3");
+	/// IMonoScript *pClass = g_pScriptSystem->GetCryBraryAssembly()->GetCustomClass("Vec3");
 	/// </example>
 	virtual IMonoClass *GetClass(const char *className, const char *nameSpace = "CryEngine") = 0;
 
@@ -49,6 +50,30 @@ public:
 	/// Determines if this assembly was loaded from C++.
 	/// </summary>
 	virtual bool IsNative() = 0;
+
+	/// <summary>
+	/// Gets the domain this assembly is loaded in.
+	/// </summary>
+	virtual IMonoDomain *GetDomain() = 0;
+
+	/// <summmary>
+	/// Retrieves a throwable exception from the assembly.
+	/// </summary>
+	virtual IMonoException *GetException(const char *nameSpace, const char *exceptionClass, const char *message = nullptr, ...)
+	{
+		va_list	args;
+		char szBuffer[4096];
+		va_start(args, message);
+		int count = vsnprintf_s(szBuffer, sizeof(szBuffer), message, args);
+		if ( count == -1 || count >=sizeof(szBuffer) )
+			szBuffer[sizeof(szBuffer)-1] = '\0';
+		va_end(args);
+
+		return _GetException(nameSpace, exceptionClass, szBuffer);
+	}
+
+private:
+	virtual IMonoException *_GetException(const char *nameSpace, const char *exceptionClass, const char *message) = 0;
 };
 
 #endif //__I_MONO_ASSEMBLY__`	

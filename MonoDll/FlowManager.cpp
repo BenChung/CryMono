@@ -10,13 +10,10 @@
 #include "MonoScriptSystem.h"
 #include <IGameFramework.h>
 
-CFlowManager::TFlowTypes CFlowManager::m_nodeTypes = TFlowTypes();
-
 CFlowManager::CFlowManager()
 	: m_refs(0)
 {
 	REGISTER_METHOD(RegisterNode);
-	REGISTER_METHOD(GetNode);
 
 	REGISTER_METHOD(IsPortActive);
 
@@ -38,14 +35,9 @@ CFlowManager::CFlowManager()
 	REGISTER_METHOD(GetTargetEntity);
 }
 
-void CFlowManager::Reset()
+CFlowManager::~CFlowManager()
 {
-	for each(auto nodeType in m_nodeTypes)
-	{
-		IMonoObject *pScript = gEnv->pMonoScriptSystem->InstantiateScript(nodeType->GetScriptName(), eScriptFlag_FlowNode);
-		nodeType->ReloadPorts(pScript);
-		SAFE_RELEASE(pScript);
-	}
+	g_pScriptSystem->EraseBinding(this);
 }
 
 void CFlowManager::RegisterNode(mono::string monoTypeName)
@@ -54,40 +46,21 @@ void CFlowManager::RegisterNode(mono::string monoTypeName)
 	if(!pFlowSystem)
 		return;
 
-	CFlowManager *pFlowManager = static_cast<CScriptSystem *>(gEnv->pMonoScriptSystem)->GetFlowManager();
-
 	const char *typeName = ToCryString(monoTypeName);
 
-	m_nodeTypes.push_back(std::shared_ptr<SNodeType>(new SNodeType(typeName)));
+	CFlowManager *pFlowManager = g_pScriptSystem->GetFlowManager();
+	if(!pFlowManager)
+	{
+		MonoWarning("Aborting registration of node type %s, flow manager was null!", typeName);
+		return;
+	}
+
 	pFlowSystem->RegisterType(typeName, (IFlowNodeFactoryPtr)pFlowManager);
 }
 
 IFlowNodePtr CFlowManager::Create(IFlowNode::SActivationInfo *pActInfo)
 {
 	return new CFlowNode(pActInfo);
-}
-
-std::shared_ptr<SNodeType> CFlowManager::GetNodeType(const char *name)
-{
-	for each(auto nodeType in m_nodeTypes)
-	{
-		if(!strcmp(nodeType->GetTypeName(), name))
-			return nodeType;
-	}
-
-	return nullptr;
-}
-
-// Used after serialization to get the valid flownode pointer.
-IFlowNode *CFlowManager::GetNode(TFlowGraphId graphId, TFlowNodeId id)
-{
-	if(IFlowGraph *pGraph = gEnv->pFlowSystem->GetGraphById(graphId))
-	{
-		if(IFlowNodeData *pNodeData = pGraph->GetNodeData(id))
-			return pNodeData->GetNode();
-	}
-
-	return nullptr;
 }
 
 void CFlowManager::ActivateOutput(CFlowNode *pNode, int index) { pNode->ActivateOutput(index, 0); }
@@ -144,41 +117,4 @@ IEntity *CFlowManager::GetTargetEntity(CFlowNode *pNode, EntityId &id)
 
 	MonoWarning("CFlowManager::GetTargetEntity returning nullptr target entity!");
 	return nullptr;
-}
-
-static const int MAX_NODE_PORT_COUNT = 20;
-void SNodeType::ReloadPorts(IMonoObject *pScript)
-{
-	if(IMonoObject *pResult = pScript->CallMethod("GetPortConfig"))
-	{
-		auto monoConfig = pResult->Unbox<SMonoNodePortConfig>();
-
-		SInputPortConfig nullptrConfig = {0};
-		SOutputPortConfig nullptrOutputConfig = {0};
-
-		IMonoArray *pInputPorts = *monoConfig.inputs;
-
-		pInputs = new SInputPortConfig[MAX_NODE_PORT_COUNT];
-
-		for(int i = 0; i < pInputPorts->GetSize(); i++)
-			pInputs[i] = pInputPorts->GetItem(i)->Unbox<SMonoInputPortConfig>().Convert();
-
-		for(int i = pInputPorts->GetSize(); i < MAX_NODE_PORT_COUNT; i++)
-			pInputs[i] = nullptrConfig;
-
-		SAFE_RELEASE(pInputPorts);
-
-		// Convert MonoArray type to our custom CScriptArray for easier handling.
-		IMonoArray *pOutputPorts = *monoConfig.outputs;
-
-		pOutputs = new SOutputPortConfig[MAX_NODE_PORT_COUNT];
-
-		for(int i = 0; i < pOutputPorts->GetSize(); i++)
-			pOutputs[i] = pOutputPorts->GetItem(i)->Unbox<SMonoOutputPortConfig>().Convert();
-
-		for(int i = pOutputPorts->GetSize(); i < MAX_NODE_PORT_COUNT; i++)
-			pOutputs[i] = nullptrOutputConfig;
-
-		SAFE_RELEASE(pOutputPorts);
-	}
 }

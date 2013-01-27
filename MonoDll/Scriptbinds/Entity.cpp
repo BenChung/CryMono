@@ -29,9 +29,12 @@ CScriptbind_Entity::CScriptbind_Entity()
 	REGISTER_METHOD(RegisterEntityClass);
 
 	REGISTER_METHOD(GetEntity);
+	REGISTER_METHOD(GetEntityId);
 	REGISTER_METHOD(FindEntity);
 	REGISTER_METHOD(GetEntitiesByClass);
 	REGISTER_METHOD(GetEntitiesInBox);
+
+	REGISTER_METHOD(QueryProximity);
 
 	REGISTER_METHOD(SetPos);
 	REGISTER_METHOD(GetPos);
@@ -75,8 +78,17 @@ CScriptbind_Entity::CScriptbind_Entity()
 	REGISTER_METHOD(StopAnimationsInAllLayers);
 
 	REGISTER_METHOD(AddEntityLink);
+	REGISTER_METHOD(GetEntityLinks);
+	REGISTER_METHOD(RemoveAllEntityLinks);
 	REGISTER_METHOD(RemoveEntityLink);
 
+	REGISTER_METHOD(GetEntityLinkName);
+	REGISTER_METHOD(GetEntityLinkTarget);
+	REGISTER_METHOD(GetEntityLinkRelativeRotation);
+	REGISTER_METHOD(GetEntityLinkRelativePosition);
+	REGISTER_METHOD(SetEntityLinkTarget);
+	REGISTER_METHOD(SetEntityLinkRelativeRotation);
+	REGISTER_METHOD(SetEntityLinkRelativePosition);
 	REGISTER_METHOD(LoadLight);
 
 	REGISTER_METHOD(FreeSlot);
@@ -119,9 +131,27 @@ CScriptbind_Entity::CScriptbind_Entity()
 	REGISTER_METHOD(Hide);
 	REGISTER_METHOD(IsHidden);
 
+	REGISTER_METHOD(GetEntityFromPhysics);
+
+	REGISTER_METHOD(SetUpdatePolicy);
+	REGISTER_METHOD(GetUpdatePolicy);
+
+	REGISTER_METHOD(IsPrePhysicsUpdateActive);
+	REGISTER_METHOD(EnablePrePhysicsUpdate);
+
+	REGISTER_METHOD(LoadParticleEmitter);
+
 	//RegisterNativeEntityClass();
 
 	gEnv->pEntitySystem->AddSink(this, IEntitySystem::OnSpawn | IEntitySystem::OnRemove, 0);
+}
+
+CScriptbind_Entity::~CScriptbind_Entity()
+{
+	if(gEnv->pEntitySystem)
+		gEnv->pEntitySystem->RemoveSink(this);
+	else
+		MonoWarning("Failed to unregister CScriptbind_Entity entity sink!");
 }
 
 void CScriptbind_Entity::PlayAnimation(IEntity *pEntity, mono::string animationName, int slot, int layer, float blend, float speed, EAnimationFlags flags)
@@ -212,7 +242,7 @@ void CScriptbind_Entity::OnSpawn(IEntity *pEntity,SEntitySpawnParams &params)
 
 bool CScriptbind_Entity::OnRemove(IEntity *pIEntity)
 {
-	if(IMonoClass *pEntityClass = gEnv->pMonoScriptSystem->GetCryBraryAssembly()->GetClass("Entity"))
+	if(IMonoClass *pEntityClass = g_pScriptSystem->GetCryBraryAssembly()->GetClass("Entity"))
 	{
 		IMonoArray *pArgs = CreateMonoArray(1);
 		pArgs->Insert(pIEntity->GetId());
@@ -245,55 +275,62 @@ bool CScriptbind_Entity::RegisterEntityClass(SEntityRegistrationParams params)
 	}
 
 	std::vector<IEntityPropertyHandler::SPropertyInfo> properties;
-	if(params.Properties != nullptr)
+	if(params.Folders != nullptr)
 	{
-		IMonoArray *propertiesArray = *params.Properties;
+		IMonoArray *pFolderArray = *params.Folders;
 
-		int numProperties = propertiesArray->GetSize();
+		int numFolders = pFolderArray->GetSize();
 	
-		const char *currentFolder = NULL;
-		for	(int i = 0; i < numProperties; ++i)
+		for	(int iFolder = 0; iFolder < numFolders; ++iFolder)
 		{
-			IMonoObject *pItem = propertiesArray->GetItem(i);
-			CRY_ASSERT(pItem);
+			IMonoObject *pFolderObject = pFolderArray->GetItem(iFolder);
+			if(!pFolderObject)
+				continue;
 
-			SMonoEntityProperty monoProperty = pItem->Unbox<SMonoEntityProperty>();
+			auto folder = pFolderObject->Unbox<SMonoEntityPropertyFolder>();
+			if(folder.properties == nullptr)
+				continue;
 
-			if(monoProperty.folder)
+			bool bDefaultFolder = !strcmp(ToCryString(folder.name), "Default") && iFolder == 0;
+
+			if(!bDefaultFolder) // first element contains properties not organized into folders
 			{
-				currentFolder = ToCryString(monoProperty.folder);
-				if(currentFolder && strcmp(currentFolder, ""))
-				{
-					IEntityPropertyHandler::SPropertyInfo groupInfo;
-					groupInfo.name = currentFolder;
-					groupInfo.type = IEntityPropertyHandler::FolderBegin;
+				IEntityPropertyHandler::SPropertyInfo folderInfo;
+				folderInfo.name = ToCryString(folder.name);
+				folderInfo.type = IEntityPropertyHandler::FolderBegin;
 
-					properties.push_back(groupInfo);
-				}
-				else
-					currentFolder = NULL;
+				properties.push_back(folderInfo);
 			}
-			else
-				currentFolder = NULL;
 
-			IEntityPropertyHandler::SPropertyInfo propertyInfo;
+			IMonoArray *pPropertyArray = *folder.properties;
 
-			propertyInfo.name = ToCryString(monoProperty.name);
-			propertyInfo.description = ToCryString(monoProperty.description);
-			propertyInfo.editType = ToCryString(monoProperty.editType);
-			propertyInfo.type = monoProperty.type;
-			propertyInfo.limits.min = monoProperty.limits.min;
-			propertyInfo.limits.max = monoProperty.limits.max;
-
-			properties.push_back(propertyInfo);
-
-			if(currentFolder)
+			for(int iProperty = 0; iProperty < pPropertyArray->GetSize(); iProperty++)
 			{
-				IEntityPropertyHandler::SPropertyInfo groupInfo;
-				groupInfo.name = currentFolder;
-				groupInfo.type = IEntityPropertyHandler::FolderEnd;
+				IMonoObject *pPropertyObject = pPropertyArray->GetItem(iProperty);
+				if(pPropertyObject == nullptr)
+					continue;
 
-				properties.push_back(groupInfo);
+				auto property = pPropertyObject->Unbox<SMonoEntityProperty>();
+
+				IEntityPropertyHandler::SPropertyInfo propertyInfo;
+
+				propertyInfo.name = ToCryString(property.name);
+				propertyInfo.description = ToCryString(property.description);
+				propertyInfo.editType = ToCryString(property.editType);
+				propertyInfo.type = property.type;
+				propertyInfo.limits.min = property.limits.min;
+				propertyInfo.limits.max = property.limits.max;
+
+				properties.push_back(propertyInfo);
+			}
+
+			if(!bDefaultFolder)
+			{
+				IEntityPropertyHandler::SPropertyInfo folderInfo;
+				folderInfo.name = ToCryString(folder.name);
+				folderInfo.type = IEntityPropertyHandler::FolderEnd;
+
+				properties.push_back(folderInfo);
 			}
 		}
 	}
@@ -383,6 +420,11 @@ IEntity *CScriptbind_Entity::GetEntity(EntityId id)
 	return gEnv->pEntitySystem->GetEntity(id);
 }
 
+EntityId CScriptbind_Entity::GetEntityId(IEntity *pEntity)
+{
+	return pEntity->GetId();
+}
+
 EntityId CScriptbind_Entity::FindEntity(mono::string name)
 {
 	if(IEntity *pEntity = gEnv->pEntitySystem->FindEntityByName(ToCryString(name)))
@@ -393,15 +435,18 @@ EntityId CScriptbind_Entity::FindEntity(mono::string name)
 
 mono::object CScriptbind_Entity::GetEntitiesByClass(mono::string _class)
 {
-	const char *className = ToCryString(_class);
+	IEntityClass *pDesiredClass = gEnv->pEntitySystem->GetClassRegistry()->FindClass(ToCryString(_class));
+
 	std::vector<EntityId> classEntities;
 
 	IEntityItPtr pIt = gEnv->pEntitySystem->GetEntityIterator();
+	pIt->MoveFirst();
+
 	while(!pIt->IsEnd())
 	{
 		if(IEntity *pEntity = pIt->Next())
 		{
-			if(!strcmp(pEntity->GetClass()->GetName(), className))
+			if(pEntity->GetClass() == pDesiredClass)
 				classEntities.push_back(pEntity->GetId());
 		}
 	}
@@ -409,19 +454,12 @@ mono::object CScriptbind_Entity::GetEntitiesByClass(mono::string _class)
 	if(classEntities.size()<1)
 		return nullptr;
 
-	IMonoClass *pEntityIdClass = gEnv->pMonoScriptSystem->GetCryBraryAssembly()->GetClass("EntityId");
+	IMonoClass *pEntityIdClass = g_pScriptSystem->GetCryBraryAssembly()->GetClass("EntityId");
 
 	IMonoArray *pArray = CreateMonoArray(classEntities.size());
-	if(g_pMonoCVars->mono_boxUnsignedIntegersAsEntityIds)
-	{
-		for(std::vector<EntityId>::iterator it = classEntities.begin(); it != classEntities.end(); ++it)
-			pArray->Insert(*it);
-	}
-	else
-	{
-		for(std::vector<EntityId>::iterator it = classEntities.begin(); it != classEntities.end(); ++it)
-			pArray->Insert(pEntityIdClass->BoxObject(&mono::entityId(*it)));
-	}
+
+	for(auto it = classEntities.begin(); it != classEntities.end(); ++it)
+		pArray->Insert(pEntityIdClass->BoxObject(&mono::entityId(*it)));
 
 	return pArray->GetManagedObject();
 }
@@ -430,23 +468,46 @@ mono::object CScriptbind_Entity::GetEntitiesInBox(AABB bbox, int objTypes)
 {
 	IPhysicalEntity **pEnts = nullptr;
 
-	IMonoClass *pEntityIdClass = gEnv->pMonoScriptSystem->GetCryBraryAssembly()->GetClass("EntityId");
+	IMonoClass *pEntityIdClass = g_pScriptSystem->GetCryBraryAssembly()->GetClass("EntityId");
 
 	int numEnts = gEnv->pPhysicalWorld->GetEntitiesInBox(bbox.min, bbox.max, pEnts, objTypes);
-	IMonoArray *pEntities = CreateMonoArray(numEnts);
+	
+	if(numEnts > 0)
+		{
+		IMonoArray *pEntities = CreateMonoArray(numEnts);
 
-	if(g_pMonoCVars->mono_boxUnsignedIntegersAsEntityIds)
-	{
-		for(int i = 0; i < numEnts; i++)
-			pEntities->Insert(gEnv->pPhysicalWorld->GetPhysicalEntityId(pEnts[i]));
-	}
-	else
-	{
 		for(int i = 0; i < numEnts; i++)
 			pEntities->Insert(pEntityIdClass->BoxObject(&mono::entityId(gEnv->pPhysicalWorld->GetPhysicalEntityId(pEnts[i]))));
+
+		return pEntities->GetManagedObject();
 	}
 
-	return pEntities->GetManagedObject();
+	return nullptr;
+}
+
+mono::object CScriptbind_Entity::QueryProximity(AABB box, mono::string className, uint32 nEntityFlags)
+{
+	SEntityProximityQuery query;
+
+	if(className != nullptr)
+		query.pEntityClass = gEnv->pEntitySystem->GetClassRegistry()->FindClass(ToCryString(className));
+
+	query.box = box;
+	query.nEntityFlags = nEntityFlags;
+
+	gEnv->pEntitySystem->QueryProximity(query);
+
+	IMonoClass *pEntityIdClass = g_pScriptSystem->GetCryBraryAssembly()->GetClass("EntityId");
+	if(query.nCount > 0)
+	{
+		IMonoArray *pEntities = CreateMonoArray(query.nCount);
+		for(int i = 0; i < query.nCount; i++)
+			pEntities->Insert(pEntityIdClass->BoxObject(&mono::entityId(query.pEntities[i]->GetId())));
+
+		return pEntities->GetManagedObject();
+	}
+
+	return nullptr;
 }
 
 void CScriptbind_Entity::SetWorldTM(IEntity *pEntity, Matrix34 tm)
@@ -598,21 +659,70 @@ void CScriptbind_Entity::SetHUDSilhouettesParams(IEntity *pEntity, float r, floa
 	pRenderProxy->SetVisionParams(r, g, b, a);
 }
 
-bool CScriptbind_Entity::AddEntityLink(IEntity *pEntity, mono::string linkName, EntityId otherId, Quat relativeRot, Vec3 relativePos)
+IEntityLink *CScriptbind_Entity::AddEntityLink(IEntity *pEntity, mono::string linkName, EntityId otherId, Quat relativeRot, Vec3 relativePos)
 {
-	return pEntity->AddEntityLink(ToCryString(linkName), otherId, relativeRot, relativePos) != nullptr;
+	return pEntity->AddEntityLink(ToCryString(linkName), otherId, relativeRot, relativePos);
 }
 
-void CScriptbind_Entity::RemoveEntityLink(IEntity *pEntity, EntityId otherId)
+mono::object CScriptbind_Entity::GetEntityLinks(IEntity *pEntity)
 {
-	for (IEntityLink *pLink = pEntity->GetEntityLinks();; pLink = pLink->next)
-    {
-		if(pLink->entityId == otherId)
-		{
-			pEntity->RemoveEntityLink(pLink);
-			break;
-		}
+	// the first link
+	IEntityLink *pLink = pEntity->GetEntityLinks();
+
+	IMonoArray *pDynArray = CreateDynamicMonoArray();
+	while(pLink != nullptr)
+	{
+		pDynArray->InsertAny(reinterpret_cast<intptr_t>(pLink));
+
+		pLink = pLink->next;
 	}
+
+	return pDynArray->GetManagedObject();
+}
+
+void CScriptbind_Entity::RemoveAllEntityLinks(IEntity *pEntity)
+{
+	pEntity->RemoveAllEntityLinks();
+}
+
+void CScriptbind_Entity::RemoveEntityLink(IEntity *pEntity, IEntityLink *pLink)
+{
+	pEntity->RemoveEntityLink(pLink);
+}
+
+mono::string CScriptbind_Entity::GetEntityLinkName(IEntityLink *pLink)
+{
+	return ToMonoString(pLink->name);
+}
+
+EntityId CScriptbind_Entity::GetEntityLinkTarget(IEntityLink *pLink)
+{
+	return pLink->entityId;
+}
+
+Quat CScriptbind_Entity::GetEntityLinkRelativeRotation(IEntityLink *pLink)
+{
+	return pLink->relRot;
+}
+
+Vec3 CScriptbind_Entity::GetEntityLinkRelativePosition(IEntityLink *pLink)
+{
+	return pLink->relPos;
+}
+
+void CScriptbind_Entity::SetEntityLinkTarget(IEntityLink *pLink, EntityId id)
+{
+	pLink->entityId = id;
+}
+
+void CScriptbind_Entity::SetEntityLinkRelativeRotation(IEntityLink *pLink, Quat relRot)
+{
+	pLink->relRot = relRot;
+}
+
+void CScriptbind_Entity::SetEntityLinkRelativePosition(IEntityLink *pLink, Vec3 relPos)
+{
+	pLink->relPos = relPos;
 }
 
 int CScriptbind_Entity::LoadLight(IEntity *pEntity, int slot, SMonoLightParams params)
@@ -935,4 +1045,36 @@ void CScriptbind_Entity::Hide(IEntity *pEntity, bool hide)
 bool CScriptbind_Entity::IsHidden(IEntity *pEntity)
 {
 	return pEntity->IsHidden();
+}
+
+IEntity *CScriptbind_Entity::GetEntityFromPhysics(IPhysicalEntity *pPhysEnt)
+{
+	return gEnv->pEntitySystem->GetEntityFromPhysics(pPhysEnt);
+}
+
+void CScriptbind_Entity::SetUpdatePolicy(IEntity *pEntity, EEntityUpdatePolicy policy)
+{
+	pEntity->SetUpdatePolicy(policy);
+}
+
+EEntityUpdatePolicy CScriptbind_Entity::GetUpdatePolicy(IEntity *pEntity)
+{
+	return pEntity->GetUpdatePolicy();
+}
+
+bool CScriptbind_Entity::IsPrePhysicsUpdateActive(IEntity *pEntity)
+{
+	return pEntity->IsPrePhysicsActive();
+}
+
+void CScriptbind_Entity::EnablePrePhysicsUpdate(IEntity *pEntity, bool enable)
+{
+	pEntity->PrePhysicsActivate(enable);
+}
+
+IParticleEmitter *CScriptbind_Entity::LoadParticleEmitter(IEntity *pEntity, int slot, IParticleEffect *pEffect, SpawnParams &spawnParams)
+{
+	int nSlot = pEntity->LoadParticleEmitter(slot, pEffect, &spawnParams);
+
+	return pEntity->GetParticleEmitter(nSlot);
 }

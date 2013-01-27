@@ -14,18 +14,18 @@
 
 #include <IGameObject.h>
 
-class CNetwork
+class CScriptbind_Network
 	: public IMonoScriptBind
 {
 public:
-	CNetwork();
-	~CNetwork();
+	CScriptbind_Network();
+	~CScriptbind_Network();
 
 	// IMonoScriptbind
 	virtual const char *GetClassName() { return "NativeNetworkMethods"; }
 	// ~IMonoScriptbind
 
-	static void RemoteInvocation(EntityId entityId, int targetScriptId, mono::string methodName, mono::object args, ERMInvocation target, int channelId);
+	static void RemoteInvocation(EntityId entityId, EntityId targetId, mono::string methodName, mono::object args, ERMInvocation target, int channelId);
 
 	static bool IsMultiplayer();
 	static bool IsServer();

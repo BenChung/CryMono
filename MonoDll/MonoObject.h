@@ -25,23 +25,32 @@ protected:
 	CScriptObject() {}
 
 public:
-	CScriptObject(MonoObject *object, bool allowGC = true);
-	CScriptObject(MonoObject *object, IMonoArray *pConstructorParams);
+	CScriptObject(MonoObject *pObject, bool allowGC = true);
+	CScriptObject(MonoObject *pObject, IMonoArray *pConstructorParams);
 	virtual ~CScriptObject();
 
 	MonoClass *GetMonoClass();
 
 	// IMonoObject
-	virtual void Release() override { delete this; }
+	virtual void Release(bool triggerGC = true) override 
+	{
+		if(!triggerGC)
+			m_objectHandle = -1;
+
+		delete this; 
+	}
 
 	virtual EMonoAnyType GetType() override;
 	virtual MonoAnyValue GetAnyValue() override;
 
 	virtual mono::object GetManagedObject() override { return (mono::object)m_pObject; }
 
+	virtual const char *ToString() override;
+
 	virtual IMonoClass *GetClass() override;
 	// ~IMonoObject
 
+	void SetManagedObject(MonoObject *newObject, bool allowGC = true);
 	static void HandleException(MonoObject *pException);
 
 protected:
@@ -52,8 +61,6 @@ protected:
 	IMonoClass *m_pClass;
 
 	int m_objectHandle;
-	// CryScriptInstance.ScriptId
-	int m_scriptId;
 };
 
 #endif //__MONO_OBJECT_H__

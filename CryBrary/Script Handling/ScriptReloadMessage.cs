@@ -10,22 +10,40 @@ using System.Windows.Forms;
 using System.Diagnostics;
 using System.CodeDom.Compiler;
 
+using CryEngine.Native;
+
 namespace CryEngine.Initialization
 {
-	public partial class ScriptReloadMessage : Form
-	{
-		public ScriptReloadMessage(Exception exception, bool canRevert)
-		{
-			InitializeComponent();
+    public partial class ScriptReloadMessage : Form
+    {
+        public ScriptReloadMessage(Exception exception, bool canRevert)
+        {
+            InitializeComponent();
 
-			tryAgainButton.Click += (s, a) => ScriptManager.Instance.OnReload();
-			revertButton.Click += (s, a) => ScriptManager.Instance.OnRevert();
-			exitButton.Click += (s, a) => Process.GetCurrentProcess().Kill();
+            tryAgainButton.Click += (s, a) =>
+                {
+                    Result = ScriptReloadResult.Retry;
+                    Close();
+                };
 
-			if (!canRevert)
-				revertButton.Enabled = false;
+            revertButton.Click += (s, a) =>
+                {
+                    Result = ScriptReloadResult.Revert;
+                    Close();
+                };
 
-			errorBox.Text = exception.ToString();
-		}
-	}
+            exitButton.Click += (s, a) => 
+                {;
+                    Result = ScriptReloadResult.Abort;
+                    Close();
+                };
+
+            if (!canRevert)
+                revertButton.Enabled = false;
+
+            errorBox.Text = exception.ToString();
+        }
+
+        public ScriptReloadResult Result { get; set; }
+    }
 }

@@ -9,7 +9,7 @@ using Xunit;
 
 namespace CryBrary.Tests.Serialization
 {
-	public class ScriptsTests : CryBraryTests
+	public class ScriptsTests
 	{
 		[Fact]
 		public void Serialize_Native_Scripts()
@@ -28,14 +28,20 @@ namespace CryBrary.Tests.Serialization
 
 				scriptManager.Scripts = serializer.Deserialize(stream) as List<CryScript>;
 				Assert.NotNull(scriptManager.Scripts);
-				Assert.Equal(3, scriptManager.Scripts.Count);
+				Assert.Equal(2, scriptManager.Scripts.Count);
 
 				var entityScript = scriptManager.FindScript(ScriptType.Entity, x => x.Type == typeof(NativeEntity));
 				Assert.NotSame(default(CryScript), entityScript);
 				Assert.NotNull(entityScript.ScriptInstances);
+
 				Assert.Equal<int>(1, (entityScript.ScriptInstances[0] as NativeEntity).Id);
 				Assert.Equal<int>(2, (entityScript.ScriptInstances[1] as NativeEntity).Id);
-				Assert.Equal<int>(3, (entityScript.ScriptInstances[2] as NativeActor).Id);
+
+				var actorScript = scriptManager.FindScript(ScriptType.Entity, x => x.Type == typeof(NativeActor));
+				Assert.NotSame(default(CryScript), actorScript);
+				Assert.NotNull(actorScript.ScriptInstances);
+
+				Assert.Equal<int>(3, (actorScript.ScriptInstances[0] as NativeActor).Id);
 			}
 		}
         
