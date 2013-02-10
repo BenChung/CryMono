@@ -141,6 +141,8 @@ CScriptbind_Entity::CScriptbind_Entity()
 
 	REGISTER_METHOD(LoadParticleEmitter);
 
+	REGISTER_METHOD(RemoteInvocation);
+
 	//RegisterNativeEntityClass();
 
 	gEnv->pEntitySystem->AddSink(this, IEntitySystem::OnSpawn | IEntitySystem::OnRemove, 0);
@@ -661,7 +663,7 @@ void CScriptbind_Entity::SetHUDSilhouettesParams(IEntity *pEntity, float r, floa
 
 IEntityLink *CScriptbind_Entity::AddEntityLink(IEntity *pEntity, mono::string linkName, EntityId otherId, Quat relativeRot, Vec3 relativePos)
 {
-	return pEntity->AddEntityLink(ToCryString(linkName), otherId, relativeRot, relativePos);
+	return pEntity->AddEntityLink(ToCryString(linkName), otherId, 0, relativeRot, relativePos);
 }
 
 mono::object CScriptbind_Entity::GetEntityLinks(IEntity *pEntity)
@@ -1077,4 +1079,19 @@ IParticleEmitter *CScriptbind_Entity::LoadParticleEmitter(IEntity *pEntity, int 
 	int nSlot = pEntity->LoadParticleEmitter(slot, pEffect, &spawnParams);
 
 	return pEntity->GetParticleEmitter(nSlot);
+}
+
+void CScriptbind_Entity::RemoteInvocation(EntityId entityId, EntityId targetId, mono::string methodName, mono::object args, ERMInvocation target, int channelId)
+{
+	CRY_ASSERT(entityId != 0);
+
+	IGameObject *pGameObject = gEnv->pGameFramework->GetGameObject(entityId);
+	CRY_ASSERT(pGameObject);
+
+	CEntity::RMIParams params(*args, ToCryString(methodName), targetId);
+
+	if(target & eRMI_ToServer)
+		pGameObject->InvokeRMI(CEntity::SvScriptRMI(), params, target, channelId);
+	else
+		pGameObject->InvokeRMI(CEntity::ClScriptRMI(), params, target, channelId);
 }
