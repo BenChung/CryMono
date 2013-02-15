@@ -663,7 +663,7 @@ void CScriptbind_Entity::SetHUDSilhouettesParams(IEntity *pEntity, float r, floa
 
 IEntityLink *CScriptbind_Entity::AddEntityLink(IEntity *pEntity, mono::string linkName, EntityId otherId, Quat relativeRot, Vec3 relativePos)
 {
-	return pEntity->AddEntityLink(ToCryString(linkName), otherId, 0, relativeRot, relativePos);
+	return pEntity->AddEntityLink(ToCryString(linkName), otherId, relativeRot, relativePos);
 }
 
 mono::object CScriptbind_Entity::GetEntityLinks(IEntity *pEntity)

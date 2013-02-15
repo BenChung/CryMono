@@ -173,7 +173,7 @@ void CFlowNode::GetConfiguration(SFlowNodeConfig &config)
 		for(int i = 0; i < numInputs; i++)
 			pInputs[i] = pInputPorts->GetItem(i)->Unbox<SMonoInputPortConfig>().Convert();
 
-		pInputs[numInputs] = InputPortConfig_Null();
+		//pInputs[numInputs] = InputPortConfig_Null();
 
 		config.pInputPorts = pInputs;
 
@@ -187,7 +187,7 @@ void CFlowNode::GetConfiguration(SFlowNodeConfig &config)
 		for(int i = 0; i < numOutputs; i++)
 			pOutputs[i] = pOutputPorts->GetItem(i)->Unbox<SMonoOutputPortConfig>().Convert();
 
-		pOutputs[numOutputs] = OutputPortConfig_Null();
+		//pOutputs[numOutputs] = OutputPortConfig_Null();
 
 		config.pOutputPorts = pOutputs;
 
