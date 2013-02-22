@@ -24,6 +24,7 @@ namespace CryEngine.Compilers.NET
                 scripts.AddRange(ProcessAssembly(assembly));
 
             scripts.AddRange(ProcessAssembly(CompileCSharpFromSource()));
+            scripts.AddRange(ProcessAssembly(CompileFSharpFromSource()));
           //  scripts.AddRange(ProcessAssembly(CompileVisualBasicFromSource()));
 
             return scripts;
@@ -102,6 +103,12 @@ namespace CryEngine.Compilers.NET
         Assembly CompileCSharpFromSource()
         {
             return CompileFromSource(CodeDomProvider.CreateProvider("CSharp"), "*.cs");
+        }
+
+        Assembly CompileFSharpFromSource()
+        {
+            return CompileFromSource(
+                Microsoft.FSharp.Compiler.CodeDom.FSharpCodeProvider.CreateProvider("FSharp"), "*.fs");
         }
 
         Assembly CompileFromSource(CodeDomProvider provider, string searchPattern)
