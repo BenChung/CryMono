@@ -35,12 +35,14 @@ public:
 
 	virtual IMonoObject *CreateInstance(IMonoArray *pConstructorParams = nullptr) override;
 
-	IMonoObject *BoxObject(void *object) override;
+	IMonoObject *BoxObject(void *object, IMonoDomain *pDomain = nullptr) override;
 
 	virtual void AddRef() override { ++m_refs; }
 
 	virtual IMonoObject *InvokeArray(IMonoObject *pObject, const char *methodName, IMonoArray *params = nullptr) override;
 	virtual IMonoObject *Invoke(IMonoObject *pObject, const char *methodName, void **params = nullptr, int numParams = 0) override;
+
+	virtual void *GetMethodThunk(const char *methodName, int numParams) override;
 
 	virtual IMonoObject *GetPropertyValue(IMonoObject *pObject, const char *propertyName) override;
 	virtual void SetPropertyValue(IMonoObject *pObject, const char *propertyName, mono::object newValue) override;

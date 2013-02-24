@@ -50,7 +50,7 @@ public:
 	/// <summary>
 	/// Boxes a type to be received as a managed type.
 	/// </summary>
-	virtual IMonoObject *BoxObject(void *object) = 0;
+	virtual IMonoObject *BoxObject(void *object, IMonoDomain *pDomain = nullptr) = 0;
 
 	/// <summary>
 	/// TODO
@@ -60,6 +60,18 @@ public:
 	/// TODO
 	/// </summary>
 	virtual IMonoObject *Invoke(IMonoObject *pObject, const char *methodName, void **params = nullptr, int numParams = 0) = 0;
+
+	/// <summary>
+	/// Gets a managed function as a native function pointer. See example for use case.
+	/// Much faster than standard invoke!
+	/// </summary>
+	/// <example>
+	/// typedef int (*GetHashCode) (mono::object obj);
+	///
+	/// GetHashCode func = pObjectClass->GetMethodThunk("GetHashCode", 0);
+	/// int hashCode = func(myObject);
+	/// </example>
+	virtual void *GetMethodThunk(const char *methodName, int numParams) = 0;
 
 	/// <summary>
 	/// TODO
