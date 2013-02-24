@@ -17,16 +17,16 @@
 
 struct IMonoObject;
 
-class CActor 
-	: public CGameObjectExtensionHelper<CActor, IActor, 2>
+class CMonoActor
+	: public CGameObjectExtensionHelper<CMonoActor, IActor, 2>
 	, public IGameObjectView
 	, public IGameObjectProfileManager
 {
 	friend class CSerializeWrapper<ISerialize>;
 
 public:
-	CActor();
-	~CActor();
+	CMonoActor();
+	~CMonoActor();
 
 	// IActor
 	virtual void	SetHealth( float health ) override;
@@ -171,8 +171,8 @@ public:
 	virtual uint8 GetDefaultProfile(EEntityAspects aspect) { return aspect == eEA_Physics ? eAP_NotPhysicalized : 0; }
 	// ~IGameObjectProfileManager
 
-	DECLARE_SERVER_RMI_NOATTACH(SvScriptRMI, CEntity::RMIParams, eNRT_ReliableUnordered);
-	DECLARE_CLIENT_RMI_NOATTACH(ClScriptRMI, CEntity::RMIParams, eNRT_ReliableUnordered);
+	DECLARE_SERVER_RMI_NOATTACH(SvScriptRMI, CMonoEntityExtension::RMIParams, eNRT_ReliableUnordered);
+	DECLARE_CLIENT_RMI_NOATTACH(ClScriptRMI, CMonoEntityExtension::RMIParams, eNRT_ReliableUnordered);
 
 	void SetScript(IMonoObject *pObject);
 
