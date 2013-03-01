@@ -107,7 +107,7 @@ namespace CryEngine.Compilers.NET
         Assembly CompileFSharpFromSource()
         {
             return CompileFromSource(
-                Microsoft.FSharp.Compiler.CodeDom.FSharpCodeProvider.CreateProvider("FSharp"), "*.fs");
+                new Microsoft.FSharp.Compiler.CodeDom.FSharpCodeProvider(), "*.fs");
         }
 
         Assembly CompileFromSource(CodeDomProvider provider, string searchPattern)
