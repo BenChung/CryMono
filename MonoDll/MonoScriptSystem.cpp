@@ -79,7 +79,7 @@ CScriptSystem::CScriptSystem()
 	
 	// We should look into storing mono binaries, configuration as well as scripts via CryPak.
 	mono_set_dirs(PathUtils::GetMonoLibPath(), PathUtils::GetMonoConfigPath());
-
+	
 #ifndef _RELEASE
 	// Enable Mono signal handling
 	// Makes sure that Mono sends back exceptions it tries to handle, for CE crash handling.
@@ -145,7 +145,9 @@ CScriptSystem::~CScriptSystem()
 
 	if(gEnv->pSystem)
 	{
-		gEnv->pSystem->GetISystemEventDispatcher()->RemoveListener(this);
+		// We destroy the script system from the shutdown event, so can't unregister while the system event listener list is iterating.
+		// Should be the last event sent, so not unregistering shouldn't be an issue.
+		//gEnv->pSystem->GetISystemEventDispatcher()->RemoveListener(this);
 		gEnv->pGameFramework->UnregisterListener(this);
 	}
 
@@ -157,6 +159,8 @@ CScriptSystem::~CScriptSystem()
 	SAFE_DELETE(m_pConverter);
 
 	SAFE_DELETE(m_pCVars);
+
+	g_pScriptSystem = nullptr;
 }
 
 bool CScriptSystem::CompleteInit()
@@ -242,11 +246,11 @@ void CScriptSystem::Reload()
 			pClass->InvokeArray(NULL, "InitializeNetworkStatics", pArgs);
 			SAFE_RELEASE(pArgs);
 
-			if(!m_bFirstReload && gEnv->IsEditor())
-				gEnv->pFlowSystem->ReloadAllNodeTypes();
-
 			for each(auto listener in m_listeners)
 				listener->OnReloadComplete();
+
+			if(!m_bFirstReload && gEnv->IsEditor())
+				gEnv->pFlowSystem->ReloadAllNodeTypes();
 		}
 		break;
 	case EScriptReloadResult_Retry:
@@ -318,15 +322,17 @@ void CScriptSystem::OnFileChange(const char *fileName)
 	if(g_pMonoCVars->mono_realtimeScriptingDetectChanges == 0)
 		return;
 
-	if(!GetFocus())
-	{
-		m_bDetectedChanges = true;
-		return;
-	}
-
 	const char *fileExt = PathUtil::GetExt(fileName);
 	if(!strcmp(fileExt, "cs") || !strcmp(fileExt, "dll"))
+	{
+		if(!GetFocus())
+		{
+			m_bDetectedChanges = true;
+			return;
+		}
+
 		Reload();
+	}
 }
 
 void CScriptSystem::OnSystemEvent(ESystemEvent event,UINT_PTR wParam,UINT_PTR lparam)
@@ -340,6 +346,11 @@ void CScriptSystem::OnSystemEvent(ESystemEvent event,UINT_PTR wParam,UINT_PTR lp
 				Reload();
 				m_bDetectedChanges = false;
 			}
+		}
+		break;
+	case ESYSTEM_EVENT_SHUTDOWN:
+		{
+			Release();
 		}
 		break;
 	}
