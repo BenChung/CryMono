@@ -79,6 +79,11 @@ namespace CryEngine.Lua
             return NativeScriptTableMethods.GetValue(Handle, name);
         }
 
+        public void SetValue(string name, object value)
+        {
+            NativeScriptTableMethods.SetValue(Handle, name, value);
+        }
+
         /// <summary>
         /// Gets a table within this table.
         /// </summary>

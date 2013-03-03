@@ -28,6 +28,7 @@ private:
 
 	static mono::object CallMethod(IScriptTable *pScriptTable, mono::string methodName, mono::object params);
 	static mono::object GetValue(IScriptTable *pScriptTable, mono::string keyName);
+	static void SetValue(IScriptTable *pScriptTable, mono::string keyName, mono::object value);
 
 	static bool ExecuteBuffer(mono::string buffer);
 };

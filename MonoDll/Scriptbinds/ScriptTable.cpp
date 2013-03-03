@@ -106,6 +106,11 @@ mono::object CScriptbind_ScriptTable::GetValue(IScriptTable *pScriptTable, mono:
 	return nullptr;
 }
 
+void CScriptbind_ScriptTable::SetValue(IScriptTable *pScriptTable, mono::string keyName, mono::object value)
+{
+	pScriptTable->SetValue(ToCryString(keyName), GetAnyValue((IMonoObject*)value));
+}
+
 IScriptTable *CScriptbind_ScriptTable::GetSubScriptTable(IScriptTable *pScriptTable, mono::string subTableName)
 {
 	ScriptAnyValue anyValue;

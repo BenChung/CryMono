@@ -15,6 +15,8 @@ namespace CryEngine.Native
         extern internal static object CallMethod(IntPtr scriptTablePtr, string methodName, object[] parameters);
         [MethodImplAttribute(MethodImplOptions.InternalCall)]
         extern internal static object GetValue(IntPtr scriptTablePtr, string keyName);
+        [MethodImplAttribute(MethodImplOptions.InternalCall)]
+        extern internal static object SetValue(IntPtr scriptTablePtr, string keyName, object value);
 
         [MethodImplAttribute(MethodImplOptions.InternalCall)]
         extern internal static bool ExecuteBuffer(string buffer);
